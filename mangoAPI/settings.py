@@ -80,6 +80,7 @@ CORS_ALLOWED_ORIGINS = [
     "capacitor://localhost",  
     "ionic://localhost",
     # Production URLs
+    "https://manggo-admin.vercel.app",  # Main Vercel deployment
     "https://manggo-admin-rwis.vercel.app",  # Vercel deployment
     "https://manggo-admin-rwis-git-main-botong101s-projects.vercel.app",  # Vercel git URL
     "https://manggo-admin-rwis-lpcbgh8xk-botong101s-projects.vercel.app",  # Vercel preview URL

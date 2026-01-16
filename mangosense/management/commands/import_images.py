@@ -100,8 +100,7 @@ class Command(BaseCommand):
                         confidence_score=random.uniform(0.7, 0.99),  # Random confidence for demo
                         disease_type=disease_type,
                         image_size=image_size,
-                        processing_time=random.uniform(0.1, 0.5),
-                        client_ip='127.0.0.1'
+                        processing_time=random.uniform(0.1, 0.5)
                     )
                     
                     imported_count += 1

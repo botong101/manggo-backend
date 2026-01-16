@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 class MLModel(models.Model):
-    """Model to store ML model metadata"""
+    """stores ml model info"""
     name = models.CharField(max_length=100)
     version = models.CharField(max_length=20)
     file_path = models.CharField(max_length=255)
@@ -14,50 +14,48 @@ class MLModel(models.Model):
         return f"{self.name} v{self.version}"
 
 class MangoImage(models.Model):
-    """Model to store uploaded mango images and predictions"""
+    #stores uploaded mango pics and ai predictions
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     image = models.ImageField(upload_to='mango_images/')
     original_filename = models.CharField(max_length=255)
-    uploaded_at = models.DateTimeField(auto_now_add=True)  # Keep this one
+    uploaded_at = models.DateTimeField(auto_now_add=True)  
     
-    # Prediction results
+    # ai prediction stuff
     predicted_class = models.CharField(max_length=50, blank=True)
     confidence_score = models.FloatField(null=True, blank=True)
-    disease_type = models.CharField(max_length=20, blank=True)  # 'leaf' or 'fruit'
-    model_used = models.CharField(max_length=20, blank=True)  # Which ML model was used ('leaf' or 'fruit')
-    model_filename = models.CharField(max_length=100, blank=True)  # Actual model filename used (e.g., 'leaf-resnet101.keras')
+    disease_type = models.CharField(max_length=20, blank=True) 
+    model_used = models.CharField(max_length=20, blank=True) 
+    model_filename = models.CharField(max_length=100, blank=True) 
     
-    # Additional fields needed for admin dashboard
+    #dashboard stuff
     disease_classification = models.CharField(max_length=50, blank=True)
-    # Remove upload_date since we already have uploaded_at
     is_verified = models.BooleanField(default=False)
     verified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_images')
     verified_date = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
-    user_feedback = models.TextField(null=True, blank=True)  # User feedback about the detection
-    user_confirmed_correct = models.BooleanField(null=True, blank=True)  # Whether user confirmed prediction as correct during analysis
+    user_feedback = models.TextField(null=True, blank=True)  
+    user_confirmed_correct = models.BooleanField(null=True, blank=True)  
     
-    # Symptoms data from user verification
-    selected_symptoms = models.JSONField(null=True, blank=True)  # All selected symptoms combined
-    primary_symptoms = models.JSONField(null=True, blank=True)  # Primary disease symptoms only
-    alternative_symptoms = models.JSONField(null=True, blank=True)  # Alternative symptoms only
-    detected_disease = models.CharField(max_length=50, blank=True)  # Disease that was detected
-    top_diseases = models.JSONField(null=True, blank=True)  # Top diseases for reference
-    symptoms_data = models.JSONField(null=True, blank=True)  # Complete symptoms data structure
+    #symptoms user picked
+    selected_symptoms = models.JSONField(null=True, blank=True)  
+    primary_symptoms = models.JSONField(null=True, blank=True)  
+    alternative_symptoms = models.JSONField(null=True, blank=True)  
+    detected_disease = models.CharField(max_length=50, blank=True)  
+    top_diseases = models.JSONField(null=True, blank=True)  
+    symptoms_data = models.JSONField(null=True, blank=True)  
     
-    # Metadata
+    #extra info
     image_size = models.CharField(max_length=20, blank=True)
     processing_time = models.FloatField(null=True, blank=True)
-    client_ip = models.GenericIPAddressField(null=True, blank=True)
     
-    # Location data from EXIF (if user consents)
+    #gps stuff
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     location_accuracy = models.FloatField(null=True, blank=True)
     location_consent_given = models.BooleanField(default=False)
-    location_accuracy_confirmed = models.BooleanField(null=True, blank=True)  # Whether user confirmed location as accurate
-    location_address = models.TextField(blank=True)  # Human-readable address
-    location_source = models.CharField(max_length=20, blank=True)  # 'exif', 'gps', 'manual'
+    location_accuracy_confirmed = models.BooleanField(null=True, blank=True) 
+    location_address = models.TextField(blank=True) 
+    location_source = models.CharField(max_length=20, blank=True) 
     
     class Meta:
         ordering = ['-uploaded_at']
@@ -66,20 +64,19 @@ class MangoImage(models.Model):
         return f"{self.original_filename} - {self.predicted_class}"
     
     def save(self, *args, **kwargs):
-        # Set disease_classification from predicted_class
+        #auto fill disease_classification from predicted_class
         if self.predicted_class and not self.disease_classification:
             self.disease_classification = self.predicted_class
         super().save(*args, **kwargs)
 
 class PredictionLog(models.Model):
-    """Model to log prediction activities"""
+    #logs when ai does prediction
     image = models.ForeignKey(MangoImage, on_delete=models.CASCADE)
     timestamp = models.DateTimeField(auto_now_add=True)
-    client_ip = models.GenericIPAddressField()
     user_agent = models.TextField(blank=True)
     response_time = models.FloatField(null=True, blank=True)
 
-    #persist prediction outputs
+    #save prediction outputs here
     probabilities = models.JSONField(null=True, blank=True)
     labels = models.JSONField(null=True, blank=True)
     prediction_summary = models.JSONField(null=True, blank=True)
@@ -93,47 +90,43 @@ class PredictionLog(models.Model):
         return f"Prediction log for {self.image.original_filename}"
 
 class UserConfirmation(models.Model):
-    """Model to store user confirmations for AI predictions"""
+    #when user confirms the prediction is right or wrong
     image = models.OneToOneField(MangoImage, on_delete=models.CASCADE, related_name='user_confirmation')
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    is_correct = models.BooleanField()  # True = "Yes, this is a match", False = "No, this does not match"
-    predicted_disease = models.CharField(max_length=50)  # What AI predicted
-    user_feedback = models.TextField(blank=True)  # Optional user comments
-    confidence_score = models.FloatField(null=True, blank=True)  # AI confidence when prediction was made
-    confirmed_at = models.DateTimeField(auto_now_add=True)
-    client_ip = models.GenericIPAddressField(null=True, blank=True)
+    predicted_disease = models.CharField(max_length=50)  
+    user_feedback = models.TextField(blank=True)  
+    confidence_score = models.FloatField(null=True, blank=True)  
     
-    # Location data (if user consents)
+    #gps stuff
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     location_accuracy = models.FloatField(null=True, blank=True)
     location_consent_given = models.BooleanField(default=False)
-    location_address = models.TextField(blank=True)  # Human-readable address
+    location_address = models.TextField(blank=True)  
     
     class Meta:
-        ordering = ['-confirmed_at']
+        ordering = ['-id']
     
     def __str__(self):
-        status = "Confirmed" if self.is_correct else "Rejected"
-        return f"{status}: {self.predicted_disease} for {self.image.original_filename}"
+        return f"Confirmation: {self.predicted_disease} for {self.image.original_filename}"
 
 class UserProfile(models.Model):
-    """Extended user profile"""
+    """extra user info like address"""
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     
-    # Address components
+    #address parts
     province = models.CharField(max_length=100, blank=True)
     city = models.CharField(max_length=100, blank=True)
     barangay = models.CharField(max_length=100, blank=True)
     postal_code = models.CharField(max_length=20, blank=True)
     
-    # Combined address (for backward compatibility)
+    #full address 
     address = models.TextField(blank=True)
     phone = models.CharField(max_length=20, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     def save(self, *args, **kwargs):
-        # Auto-generate combined address from components
+        
         if self.province or self.city or self.barangay:
             address_parts = []
             if self.barangay:
@@ -151,7 +144,7 @@ class UserProfile(models.Model):
         return f"Profile for {self.user.username}"
 
 class Notification(models.Model):
-    """Model to store notifications for admin dashboard"""
+    #notifs for admin panel
     NOTIFICATION_TYPES = [
         ('image_upload', 'Image Upload'),
         ('system', 'System'),
@@ -162,7 +155,7 @@ class Notification(models.Model):
     title = models.CharField(max_length=200)
     message = models.TextField()
     related_image = models.ForeignKey(MangoImage, on_delete=models.CASCADE, null=True, blank=True)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)  # User who triggered the notification
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     

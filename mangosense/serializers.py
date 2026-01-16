@@ -53,7 +53,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'full_address']
     
     def get_full_address(self, obj):
-        """Generate full address from components"""
+        """put address parts together"""
         address_parts = []
         if obj.barangay:
             address_parts.append(obj.barangay)
@@ -76,12 +76,12 @@ class MangoImageSerializer(serializers.ModelSerializer):
             'confidence_score', 'uploaded_at', 'is_verified', 'notes', 'disease_classification',
             'verified_by', 'verified_date', 'disease_type', 'user_feedback', 'user_confirmed_correct',
             'latitude', 'longitude', 'location_address', 'location_source', 'location_consent_given', 'location_accuracy_confirmed',
-            # Add symptoms fields
+            #symptoms stuff
             'selected_symptoms', 'primary_symptoms', 'alternative_symptoms', 'detected_disease', 'top_diseases', 'symptoms_data'
         ]
         read_only_fields = [
             'id', 'uploaded_at', 'predicted_class', 'confidence_score',
-            'disease_classification', 'image_size', 'processing_time', 'client_ip', 'user_confirmed_correct'
+            'disease_classification', 'image_size', 'processing_time', 'user_confirmed_correct'
         ]
 
     def get_image_url(self, obj):
@@ -91,26 +91,25 @@ class MangoImageSerializer(serializers.ModelSerializer):
         return obj.image.url if obj.image else None
 
 class MangoImageUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating MangoImage records"""
+    """for updating mango image records"""
     class Meta:
         model = MangoImage
         fields = [
             'predicted_class', 'confidence_score', 'disease_type',
-            'image_size', 'processing_time', 'client_ip', 'is_verified'
+            'image_size', 'processing_time', 'is_verified'
         ]
-        # All fields are optional for updates
+        #fields that can be updated
         extra_kwargs = {
             'predicted_class': {'required': False},
             'confidence_score': {'required': False},
             'disease_type': {'required': False},
             'image_size': {'required': False},
             'processing_time': {'required': False},
-            'client_ip': {'required': False},
             'is_verified': {'required': False},
         }
 
 class BulkUpdateSerializer(serializers.Serializer):
-    """Serializer for bulk updating multiple images"""
+    """for updating lots of images at once"""
     image_ids = serializers.ListField(
         child=serializers.IntegerField(),
         min_length=1,
@@ -121,7 +120,7 @@ class BulkUpdateSerializer(serializers.Serializer):
     )
     
     def validate_image_ids(self, value):
-        """Validate that all image IDs exist"""
+        """make sure images exist"""
         existing_ids = MangoImage.objects.filter(id__in=value).values_list('id', flat=True)
         missing_ids = set(value) - set(existing_ids)
         if missing_ids:
@@ -129,10 +128,10 @@ class BulkUpdateSerializer(serializers.Serializer):
         return value
     
     def validate_updates(self, value):
-        """Validate update fields"""
+        """check update fields are ok"""
         allowed_fields = [
             'predicted_class', 'confidence_score', 'disease_type',
-            'image_size', 'processing_time', 'client_ip', 'is_verified'
+            'image_size', 'processing_time', 'is_verified'
         ]
         
         invalid_fields = set(value.keys()) - set(allowed_fields)
@@ -152,19 +151,19 @@ class PredictionLogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = PredictionLog
-        fields = ['id', 'image', 'timestamp', 'client_ip', 'user_agent', 'response_time']
+        fields = ['id', 'image', 'timestamp', 'user_agent', 'response_time']
         read_only_fields = ['id', 'timestamp']
 
 class ImageUploadSerializer(serializers.Serializer):
-    """Serializer for image upload endpoint"""
+    """for uploading images"""
     image = serializers.ImageField()
     
     def validate_image(self, value):
-        # Validate image size (max 5MB)
+        #max 5mb
         if value.size > 5 * 1024 * 1024:
             raise serializers.ValidationError("Image size cannot exceed 5MB")
         
-        # Validate image format
+        #only these formats ok:
         allowed_formats = ['JPEG', 'JPG', 'PNG']
         if value.image.format not in allowed_formats:
             raise serializers.ValidationError("Only JPEG and PNG images are allowed")

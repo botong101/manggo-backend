@@ -14,7 +14,7 @@ class MangoModelTrainer:
         self.model_path = os.path.join(settings.BASE_DIR, 'ml_models', 'efficientnetb0-mango.keras')
         
     def count_images_per_class(self):
-        """Count images in each class in the training directory"""
+        """count pics in each class"""
         class_counts = {}
         for cls in os.listdir(self.train_dir):
             count = len(os.listdir(os.path.join(self.train_dir, cls)))
@@ -23,7 +23,7 @@ class MangoModelTrainer:
         return class_counts
     
     def load_datasets(self):
-        """Load training, validation, and test datasets"""
+        """load train val and test data"""
         self.train_dataset = tf.keras.preprocessing.image_dataset_from_directory(
             self.train_dir,
             image_size=(224, 224),
@@ -52,8 +52,8 @@ class MangoModelTrainer:
         return self.train_dataset, self.val_dataset, self.test_dataset
     
     def create_model(self):
-        """Create the EfficientNetB0 model"""
-        # Data augmentation pipeline
+        """make the efficientnet model"""
+        # augmentation stuff
         data_augmentation = tf.keras.Sequential([
             tf.keras.layers.RandomFlip("horizontal"),
             tf.keras.layers.RandomRotation(0.1),
@@ -61,7 +61,7 @@ class MangoModelTrainer:
             tf.keras.layers.RandomContrast(0.1),
         ])
 
-        # Build EfficientNetB0 model
+        # make efficientnet base
         base_model = tf.keras.applications.EfficientNetB0(
             include_top=False,
             input_shape=(224, 224, 3),
@@ -82,7 +82,7 @@ class MangoModelTrainer:
         return self.model, base_model
     
     def train_model(self, epochs=10):
-        """Train the model with initial training and fine-tuning"""
+        """train and finetune the model"""
         model, base_model = self.create_model()
         
         model.compile(
@@ -94,7 +94,7 @@ class MangoModelTrainer:
         early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
         reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1)
 
-        # Initial training
+        # first training phase
         history = model.fit(
             self.train_dataset,
             validation_data=self.val_dataset,
@@ -102,7 +102,7 @@ class MangoModelTrainer:
             callbacks=[early_stopping, reduce_lr]
         )
 
-        # Fine-tuning
+        # fine tune phase
         base_model.trainable = True
         model.compile(
             optimizer=tf.keras.optimizers.Adam(1e-5),
@@ -120,11 +120,11 @@ class MangoModelTrainer:
         return model, history, history_finetune
     
     def evaluate_model(self, model):
-        """Evaluate the model and generate metrics"""
+        """test model and get metrics"""
         test_loss, test_acc = model.evaluate(self.test_dataset)
         print(f"Test accuracy: {test_acc:.2f}")
         
-        # Predict on test set
+        # predict test set
         y_true = []
         y_pred = []
 
@@ -133,14 +133,14 @@ class MangoModelTrainer:
             y_true.extend(np.argmax(labels.numpy(), axis=1))
             y_pred.extend(np.argmax(preds, axis=1))
 
-        # Confusion matrix
+        # make confusion matrix
         cm = confusion_matrix(y_true, y_pred)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.class_names)
         disp.plot(cmap='Blues')
         plt.title("Confusion Matrix")
         plt.show()
 
-        # Classification report
+        # classification stuff
         report = classification_report(y_true, y_pred, target_names=self.class_names, digits=4)
         accuracy = accuracy_score(y_true, y_pred)
 
@@ -151,28 +151,28 @@ class MangoModelTrainer:
         return test_acc, report, accuracy
     
     def save_model(self, model):
-        """Save the trained model"""
+        """save the trained model"""
         os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
         model.save(self.model_path)
         print(f"Model saved to: {self.model_path}")
         
     def run_full_training(self, epochs=10):
-        """Run the complete training pipeline"""
+        """run whole training pipeline"""
         print("Starting mango classification model training...")
         
-        # Count images
+        # count images
         self.count_images_per_class()
         
-        # Load datasets
+        # load data
         self.load_datasets()
         
-        # Train model
+        # train it
         model, history, history_finetune = self.train_model(epochs)
         
-        # Evaluate model
+        # evaluate it
         test_acc, report, accuracy = self.evaluate_model(model)
         
-        # Save model
+        # save it
         self.save_model(model)
         
         return model, test_acc, report

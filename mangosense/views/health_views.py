@@ -11,24 +11,24 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET"])
 def health_check(request):
     """
-    Health check endpoint for Railway deployment
-    Returns 200 OK if service is healthy, 503 if unhealthy
+    check if server is alive for railway
+    returns 200 if good 503 if broken
     
-    Checks:
-    - Database connectivity
-    - Basic model imports
-    - Application responsiveness
+    checks:
+    - db connection
+    - models work
+    - app responding
     """
     try:
-        # Check database connectivity
+        # test db connection
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
         
-        # Check if models can be imported (basic app health)
+        # check if models load ok
         from ..models import MangoImage
         
-        # Get basic statistics for health verification
+        # get some stats
         try:
             image_count = MangoImage.objects.count()
         except Exception:

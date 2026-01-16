@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 @csrf_exempt
 @require_http_methods(["POST"])
 def admin_login_api(request):
-    """Admin login endpoint for Angular frontend"""
+    """login for admin panel"""
     try:
         data = json.loads(request.body)
         username = data.get('username', '').strip()
@@ -20,13 +20,13 @@ def admin_login_api(request):
                 'error': 'Username and password are required'
             }, status=400)
         
-        # Authenticate user
+        # check user
         user = authenticate(username=username, password=password)
         
         if user is not None and user.is_active:
-            # Check if user is superuser (admin)
+            # check if admin
             if user.is_superuser:
-                # Generate JWT tokens
+                # make jwt tokens
                 refresh = RefreshToken.for_user(user)
                 access_token = refresh.access_token
                 
@@ -66,7 +66,7 @@ def admin_login_api(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def admin_refresh_token(request):
-    """Refresh JWT token for admin"""
+    """refresh admin jwt token"""
     try:
         data = json.loads(request.body)
         refresh_token = data.get('refresh')

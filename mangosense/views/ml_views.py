@@ -19,22 +19,19 @@ from .utils import (
 
 import tensorflow as tf
 
-# ML Configuration
+# image size for model
 IMG_SIZE = (224, 224)
 
-# Separate class names for each model type (IMPROVED ORGANIZATION)
+# diseases the leaf model knows
 LEAF_CLASS_NAMES = [
     'Anthracnose','Die Back', 'Healthy','Powdery Mildew','Sooty Mold',
 ]
 
 FRUIT_CLASS_NAMES = [
-    'Anthracnose', 'Black Mold Rot', 'Healthy', 'Stem End Rot'
+    'Anthracnose', 'Healthy' 
 ]
 
-# Keep backward compatibility with old class_names (for any legacy code)
-# class_names = LEAF_CLASS_NAMES + ['Black Mold Rot', 'Stem End Rot']
-
-# Treatment suggestions (complete list)
+# what to do for each disease
 treatment_suggestions = {
     'Anthracnose': 'The diseased twigs should be pruned and burnt along with fallen leaves. Spraying twice with Carbendazim (Bavistin 0.1%) at 15 days interval during flowering controls blossom infection.',
     'Bacterial Canker': 'Three sprays of Streptocycline (0.01%) or Agrimycin-100 (0.01%) after first visual symptom at 10 day intervals are effective in controlling the disease.',
@@ -49,50 +46,46 @@ treatment_suggestions = {
 }
 
 def get_treatment_for_disease(disease_name):
-    """
-    Get treatment suggestion for a disease with better error handling and debugging
-    """
+   
     if not disease_name:
         return "No treatment information available - disease name is empty."
     
-    # Direct lookup first
+    # try exact match first
     treatment = treatment_suggestions.get(disease_name)
     if treatment:
         return treatment
     
-    # Try case-insensitive lookup
+    # try ignoring caps
     disease_lower = disease_name.lower()
     for key, value in treatment_suggestions.items():
         if key.lower() == disease_lower:
             return value
     
-    # Try partial match (for cases like 'Die Back' vs 'Die_Back')
+    # try matching with spaces instead of underscores
     disease_normalized = disease_name.replace('_', ' ').replace('-', ' ').strip()
     for key, value in treatment_suggestions.items():
         key_normalized = key.replace('_', ' ').replace('-', ' ').strip()
         if disease_normalized.lower() == key_normalized.lower():
             return value
     
-    # Log available keys for debugging
+    # print what we got for debugging
     available_keys = list(treatment_suggestions.keys())
     
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
-# Model paths
-LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaf-resnet101.keras')
-FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'fruit-resnet101.keras')
+#where the models are
+LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaf-mobilenetv2.keras')
+FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'mobilenetv2.keras')
 
 
 def preprocess_image(image_file):
-    """Preprocess image for ML model prediction"""
     try:
         img = Image.open(image_file).convert('RGB')
         original_size = img.size
         img = img.resize(IMG_SIZE)
         img_array = np.array(img)
         
-        # CRITICAL FIX: Apply EfficientNet preprocessing then add batch dimension
-        img_array = tf.keras.applications.efficientnet.preprocess_input(img_array)
+        img_array = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)
         img_array = np.expand_dims(img_array, axis=0)
         
         return img_array, original_size
@@ -103,12 +96,11 @@ def preprocess_image(image_file):
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def predict_image(request):
-    """Handle image prediction from mobile Ionic app"""
+    
     import time
     start_time = time.time()
     
-    # Add debug logging
-    
+    # debug
     if 'image' not in request.FILES:
         return JsonResponse(
             create_api_response(
@@ -121,23 +113,22 @@ def predict_image(request):
 
     try:
         image_file = request.FILES['image']
-        client_ip = get_client_ip(request)
         
-        # Extract location data from request
+        # get gps data from request
         latitude = request.data.get('latitude')
         longitude = request.data.get('longitude')
         location_accuracy_confirmed = request.data.get('location_accuracy_confirmed', 'false').lower() == 'true'
         location_source = request.data.get('location_source', '')
         location_address = request.data.get('location_address', '')
         
-        # Check if this is a preview-only request (no database save)
+        # check if just preview (dont save to db)
         preview_only = request.data.get('preview_only', 'false').lower() == 'true'
         
-        # Extract user verification data
+        # get what user said about detection
         is_detection_correct = request.data.get('is_detection_correct', '').lower() == 'true'
         user_feedback = request.data.get('user_feedback', '')
         
-        # Extract symptoms data from verification
+        # get symptoms they picked
         try:
             selected_symptoms = json.loads(request.data.get('selected_symptoms', '[]')) if request.data.get('selected_symptoms') else []
         except (json.JSONDecodeError, TypeError):
@@ -165,7 +156,7 @@ def predict_image(request):
         except (json.JSONDecodeError, TypeError):
             symptoms_data = {}
         
-        # Validate image file using utils
+        # make sure image is ok
         validation_errors = validate_image_file(image_file)
         if validation_errors:
             return JsonResponse(
@@ -177,7 +168,7 @@ def predict_image(request):
                 status=400
             )
 
-        # Process image for prediction with error handling
+        # prep the image
         try:
             img_array, original_size = preprocess_image(image_file)
         except Exception as preprocessing_error:
@@ -190,17 +181,17 @@ def predict_image(request):
                 status=500
             )
 
-        # Get prediction type and location data
+        # fruit or leaf?
         detection_type = request.data.get('detection_type', 'leaf')
         
-        # Extract location data from request
+        # gps stuff again
         latitude = request.data.get('latitude')
         longitude = request.data.get('longitude')
         location_accuracy_confirmed = request.data.get('location_accuracy_confirmed', 'false').lower() == 'true'
         location_source = request.data.get('location_source', '')
         location_address = request.data.get('location_address', '')
         
-        # Choose model path and class names (IMPROVED LOGIC)
+        # pick which model to use
         if detection_type == 'fruit':
             model_path = FRUIT_MODEL_PATH
             model_used = 'fruit'
@@ -211,7 +202,7 @@ def predict_image(request):
             model_class_names = LEAF_CLASS_NAMES
 
 
-        # Check if model file exists
+        # check model file exists
         if not os.path.exists(model_path):
             return JsonResponse(
                 create_api_response(
@@ -222,7 +213,7 @@ def predict_image(request):
                 status=500
             )
 
-        # Load the model dynamically with error handling
+        # load the ai model
         try:
             model = tf.keras.models.load_model(model_path)
         except Exception as model_error:
@@ -235,7 +226,7 @@ def predict_image(request):
                 status=500
             )
 
-        # Real ML prediction with error handling
+        # run it thru the model
         try:
             prediction = model.predict(img_array)
             prediction = np.array(prediction).flatten()
@@ -249,13 +240,13 @@ def predict_image(request):
                 status=500
             )
 
-        # Get prediction summary using utils
+        # organize the results
         prediction_summary = get_prediction_summary(prediction, model_class_names)
 
-        # Set confidence threshold
+        # min confidence to show disease
         CONFIDENCE_THRESHOLD = 20.0
 
-        # Check if top prediction is below threshold
+        # if too low just say unknown
         if prediction_summary['primary_prediction']['confidence'] < CONFIDENCE_THRESHOLD:
             unknown_response = {
                 'disease': 'Unknown',
@@ -303,23 +294,23 @@ def predict_image(request):
                 )
             )
 
-        # Add treatment suggestions
+        # add treatment info
         for pred in prediction_summary['top_3']:
             pred['treatment'] = get_treatment_for_disease(pred['disease'])
             pred['detection_type'] = model_used
 
-        # Alternative symptoms data will be generated by frontend service
-        # Frontend has getDiseaseSymptoms() method that handles this
+        # frontend will handle symptoms itself
+        # it has getDiseaseSymptoms() for that
         primary_disease = prediction_summary['primary_prediction']['disease']
-        alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]  # Get top 2-3 alternative diseases
+        alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]  # top 2-3 diseases
 
-        # Save to database only if not preview mode
+        # save to db unless just preview
         saved_image_id = None
         if not preview_only:
             try:
                 image_file.seek(0)
                 
-                # Prepare location data for storage - always save if available
+                # set up location data for saving
                 location_data = {}
                 if latitude and longitude:
                     try:
@@ -342,7 +333,7 @@ def predict_image(request):
                         'location_accuracy_confirmed': False,
                     })
                 
-                # Calculate processing time
+                # how long did it take
                 processing_time = time.time() - start_time
                 
                 mango_image = MangoImage.objects.create(
@@ -350,14 +341,13 @@ def predict_image(request):
                     original_filename=image_file.name,
                     predicted_class=prediction_summary['primary_prediction']['disease'],
                     disease_classification=prediction_summary['primary_prediction']['disease'],
-                    disease_type=model_used,  # Use the actual model that was used for detection
+                    disease_type=model_used, 
                     model_used=model_used,  # Store which model was actually used
                     model_filename=os.path.basename(model_path),  # Store the actual model filename
                     confidence_score=prediction_summary['primary_prediction']['confidence'] / 100,
                     user=request.user if request.user.is_authenticated else None,
                     image_size=f"{original_size[0]}x{original_size[1]}",
                     processing_time=processing_time,
-                    client_ip=get_client_ip(request),
                     notes=f"Predicted via mobile app with {prediction_summary['primary_prediction']['confidence']:.2f}% confidence",
                     is_verified=False,  # Always default to unverified - admin must manually verify
                     user_feedback=user_feedback if user_feedback else None,  # User feedback can be NULL
@@ -374,18 +364,18 @@ def predict_image(request):
                 log_prediction_activity(request.user, mango_image.id, prediction_summary)
                 saved_image_id = mango_image.id
                 
-                # Create notification for admin dashboard
+                # make notif for admin
                 try:
-                    # Get the user who uploaded the image or use a default system user
+                    # get user who uploaded or find an admin
                     notification_user = mango_image.user if mango_image.user else None
                     
-                    # If no user is authenticated, try to get an admin user for the notification
+                    # if nobody logged in grab admin for notif
                     if not notification_user:
                         from django.contrib.auth.models import User
                         notification_user = User.objects.filter(is_staff=True).first()
                     
                     if notification_user:
-                        # Create a notification about the new image upload
+                        # make the notification
                         Notification.objects.create(
                             notification_type='image_upload',
                             title=f'New {model_used.title()} Image Upload',
@@ -397,12 +387,12 @@ def predict_image(request):
                         print(f"No user available for notification creation")
                 except Exception as notification_error:
                     print(f"Error creating notification: {notification_error}")
-                    # Don't fail the entire request if notification creation fails
+                    # dont break everything if notif fails
             except Exception as e:
                 print(f"Error saving image to database: {e}")
                 saved_image_id = None
 
-        # Memory cleanup
+        # clean up memory
         gc.collect()
 
         response_data = {
@@ -442,7 +432,7 @@ def predict_image(request):
             }
         }
         
-        # Include saved_image_id only if not preview mode and image was saved
+        # only add image id if we actually saved it
         if not preview_only and saved_image_id:
             response_data['saved_image_id'] = saved_image_id
         try:
@@ -451,7 +441,6 @@ def predict_image(request):
             response_time = time.time() - start_time
             PredictionLog.objects.create(
                 image=mango_image if 'mango_image' in locals() else None,
-                client_ip=get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
                 response_time=response_time,
                 probabilities=probs_list,
@@ -483,9 +472,9 @@ def predict_image(request):
 
 @api_view(['GET'])
 def test_model_status(request):
-    """Test endpoint to check if model and class names are loaded properly"""
+    
     try:
-        # Get active model info from database
+        # see if theres an active model in db
         active_model = MLModel.objects.filter(is_active=True).first()
         
         model_status = {

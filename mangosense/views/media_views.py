@@ -1,5 +1,5 @@
 """
-Media serving views for production deployment
+media file serving for production
 """
 import os
 import mimetypes
@@ -12,32 +12,31 @@ from django.views.decorators.http import require_http_methods
 @csrf_exempt
 @require_http_methods(["GET"])
 def serve_media_file(request, file_path):
-    """Serve media files in production when Django doesn't serve them automatically"""
     try:
-        # Construct the full file path
+        # build full path
         full_path = os.path.join(settings.MEDIA_ROOT, file_path)
         
-        # Security check - ensure the file is within MEDIA_ROOT
+        # security check - make sure file is in media folder
         full_path = os.path.abspath(full_path)
         media_root = os.path.abspath(settings.MEDIA_ROOT)
         
         if not full_path.startswith(media_root):
             raise Http404("File not found")
         
-        # Check if file exists
+        # check file exists
         if not os.path.exists(full_path):
             raise Http404("File not found")
         
-        # Determine the content type
+        # figure out content type
         content_type, _ = mimetypes.guess_type(full_path)
         if content_type is None:
             content_type = 'application/octet-stream'
         
-        # Read and serve the file
+        # read and send file
         with open(full_path, 'rb') as file:
             response = HttpResponse(file.read(), content_type=content_type)
             response['Content-Length'] = os.path.getsize(full_path)
-            # Add CORS headers for cross-origin requests
+            # cors stuff for cross-origin
             response['Access-Control-Allow-Origin'] = '*'
             response['Access-Control-Allow-Methods'] = 'GET'
             response['Access-Control-Allow-Headers'] = 'Content-Type'
@@ -50,23 +49,22 @@ def serve_media_file(request, file_path):
 @csrf_exempt  
 @require_http_methods(["GET"])
 def test_media_access(request):
-    """Test endpoint to check media file access"""
     try:
         media_root = settings.MEDIA_ROOT
         media_url = settings.MEDIA_URL
         
-        # Check if media directory exists
+        # check if media folder exists
         media_exists = os.path.exists(media_root)
         
-        # List some files in mango_images
+        # list some mango images
         mango_images_path = os.path.join(media_root, 'mango_images')
         mango_images_exist = os.path.exists(mango_images_path)
         
         files_list = []
         if mango_images_exist:
-            files_list = os.listdir(mango_images_path)[:5]  # First 5 files
+            files_list = os.listdir(mango_images_path)[:5]  # first 5
         
-        # Test a specific image
+        # test one image
         test_image = None
         if files_list:
             test_image_path = os.path.join(mango_images_path, files_list[0])
@@ -108,18 +106,18 @@ def test_media_access(request):
 @csrf_exempt
 @require_http_methods(["GET"])
 def debug_image_url(request, image_id):
-    """Debug a specific image URL construction"""
+    """debug image url stuff"""
     try:
         from ..models import MangoImage
         from ..serializers import MangoImageSerializer
         
-        # Get the image
+        # get the image
         image = MangoImage.objects.get(id=image_id)
         
-        # Serialize the image
+        # serialize it
         serializer = MangoImageSerializer(image, context={'request': request})
         
-        # Check if the actual file exists
+        # check if file actually exists
         file_exists = os.path.exists(image.image.path) if image.image else False
         
         return JsonResponse({

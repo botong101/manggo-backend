@@ -14,18 +14,18 @@ from datetime import datetime
 
 
 def create_notifications_from_images():
-    """Helper function to create notifications from existing MangoImage records"""
+    """make notifications from mango images"""
     from django.contrib.auth.models import User
     
     images = MangoImage.objects.filter(
-        notification__isnull=True  # Only images that don't have notifications yet
+        notification__isnull=True  # only ones without notifications yet
     ).order_by('-uploaded_at')
     
-    # Get or create a default admin user for anonymous uploads
+    # get admin user for anon uploads
     try:
         default_user = User.objects.filter(is_staff=True).first()
         if not default_user:
-            # If no admin user exists, get the first user or create a system user
+            # no admin? get first user or make system user
             default_user = User.objects.first()
             if not default_user:
                 default_user = User.objects.create_user(
@@ -39,10 +39,10 @@ def create_notifications_from_images():
     
     created_count = 0
     for image in images:
-        # Use the image's user if it exists, otherwise use default_user
+        # use image user or default
         notification_user = image.user if image.user else default_user
         
-        if notification_user:  # Only create if we have a user
+        if notification_user:  # only if we got a user
             notification = Notification.objects.create(
                 notification_type='image_upload',
                 title=f'New {image.disease_type or "Mango"} Image Upload',
@@ -59,26 +59,26 @@ def create_notifications_from_images():
 @permission_classes([IsAuthenticated])
 def notifications_list(request):
     """
-    Get list of notifications for admin panel
+    get notifications for admin panel
     """
     try:
-        # Only check for new images and create notifications if specifically requested
-        # This prevents recreation of deleted notifications on every refresh
+        # only create new ones if asked
+        # prevents recreating deleted ones
         create_new = request.GET.get('create_new', 'false').lower() == 'true'
         if create_new:
             new_notifications_count = create_notifications_from_images()
         
-        # Get all notifications ordered by created date (newest first)
+        # get all notifications newest first
         notifications = Notification.objects.all().order_by('-created_at')
         
-        # Pagination
+        # paging
         page = request.GET.get('page', 1)
         per_page = request.GET.get('per_page', 50)
         
         paginator = Paginator(notifications, per_page)
         page_notifications = paginator.get_page(page)
         
-        # Convert to notification format
+        # turn into notification data
         notifications_data = []
         for notification in page_notifications:
             image = notification.related_image
@@ -123,7 +123,7 @@ def notifications_list(request):
 @permission_classes([IsAuthenticated])
 def mark_notification_read(request, notification_id):
     """
-    Mark a specific notification as read
+    mark one notification as read
     """
     try:
         notification = Notification.objects.get(id=notification_id)
@@ -151,10 +151,10 @@ def mark_notification_read(request, notification_id):
 @permission_classes([IsAuthenticated])
 def mark_all_notifications_read(request):
     """
-    Mark all notifications as read
+    mark all notifications read
     """
     try:
-        # Mark all notifications as read (or filter by user if needed)
+        # mark all unread as read
         updated_count = Notification.objects.filter(is_read=False).update(is_read=True)
         
         return Response({
@@ -174,7 +174,7 @@ def mark_all_notifications_read(request):
 @permission_classes([IsAuthenticated])
 def notification_detail(request, notification_id):
     """
-    Get detailed information about a specific notification or delete it
+    get or delete one notification
     """
     try:
         notification = Notification.objects.get(id=notification_id)
@@ -200,17 +200,16 @@ def notification_detail(request, notification_id):
                 'notes': image.notes if image else '',
                 'image_size': image.image_size if image else '',
                 'processing_time': image.processing_time if image else None,
-                'client_ip': str(image.client_ip) if image and image.client_ip else None,
                 'title': notification.title,
                 'message': notification.message
             }
             return Response(notification_data)
         
         elif request.method == 'DELETE':
-            # Store notification info for response
+            # save title for response
             notification_title = notification.title
             
-            # Delete only the notification, not the related image
+            # delete notification but keep image
             notification.delete()
             
             return Response({
@@ -234,10 +233,10 @@ def notification_detail(request, notification_id):
 @permission_classes([IsAuthenticated])
 def delete_selected_notifications(request):
     """
-    Delete multiple notifications at once (notifications only, not the images)
+    delete multiple notifications at once (not the images tho)
     """
     try:
-        # Get the list of IDs from request
+        # get ids from request
         data = json.loads(request.body) if request.body else {}
         notification_ids = data.get('ids', [])
         
@@ -247,7 +246,7 @@ def delete_selected_notifications(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get all notifications to delete
+        # get notifications to delete
         notifications = Notification.objects.filter(id__in=notification_ids)
         
         if not notifications.exists():
@@ -259,7 +258,7 @@ def delete_selected_notifications(request):
         deleted_count = 0
         deleted_titles = []
         
-        # Delete each notification (but keep the associated images)
+        # delete each one but keep images
         for notification in notifications:
             notification_title = notification.title
             deleted_titles.append(notification_title)
@@ -290,10 +289,10 @@ def delete_selected_notifications(request):
 @permission_classes([IsAuthenticated])
 def mark_all_notifications_read(request):
     """
-    Mark all notifications as read for the current user
+    mark all notifications read for user
     """
     try:
-        # Mark all notifications as read (or filter by user if needed)
+        # mark all unread as read
         updated_count = Notification.objects.filter(is_read=False).update(is_read=True)
         
         return Response({

@@ -12,21 +12,18 @@ import json
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def save_user_confirmation(request):
-    """Save user confirmation for AI prediction"""
+    """save user feedback for ai prediction"""
     try:
         data = request.data
         
-        # Required fields
+        # need these
         image_id = data.get('image_id')
-        is_correct = data.get('is_correct')
         predicted_disease = data.get('predicted_disease')
         
-        if image_id is None or is_correct is None or not predicted_disease:
+        if image_id is None or not predicted_disease:
             missing_fields = []
             if image_id is None:
                 missing_fields.append('image_id')
-            if is_correct is None:
-                missing_fields.append('is_correct')
             if not predicted_disease:
                 missing_fields.append('predicted_disease')
             
@@ -39,7 +36,7 @@ def save_user_confirmation(request):
                 status=400
             )
         
-        # Get the image
+        # get the image
         try:
             image = MangoImage.objects.get(id=image_id)
         except MangoImage.DoesNotExist:
@@ -52,7 +49,7 @@ def save_user_confirmation(request):
                 status=404
             )
         
-        # Check if confirmation already exists
+        # check if already confirmed
         existing_confirmation = UserConfirmation.objects.filter(image=image).first()
         if existing_confirmation:
             return JsonResponse(
@@ -64,18 +61,16 @@ def save_user_confirmation(request):
                 status=400
             )
         
-        # Create confirmation record
+        # make confirmation record
         confirmation_data = {
             'image': image,
             'user': request.user if request.user.is_authenticated else None,
-            'is_correct': bool(is_correct),
             'predicted_disease': predicted_disease,
             'user_feedback': data.get('user_feedback', ''),
             'confidence_score': data.get('confidence_score'),
-            'client_ip': get_client_ip(request),
         }
         
-        # Handle location data if provided and consent given
+        # handle gps stuff if user said ok
         location_consent = data.get('location_consent_given', False)
         
         if location_consent:
@@ -97,9 +92,7 @@ def save_user_confirmation(request):
         response_data = {
             'confirmation_id': confirmation.id,
             'image_id': image.id,
-            'is_correct': confirmation.is_correct,
             'predicted_disease': confirmation.predicted_disease,
-            'confirmed_at': confirmation.confirmed_at.isoformat(),
             'location_saved': confirmation.location_consent_given
         }
         
@@ -133,9 +126,7 @@ def save_user_confirmation(request):
                 data={
                     'confirmation_id': confirmation.id,
                     'image_id': image.id,
-                    'is_correct': confirmation.is_correct,
                     'predicted_disease': confirmation.predicted_disease,
-                    'confirmed_at': confirmation.confirmed_at.isoformat(),
                     'location_saved': confirmation.location_consent_given
                 },
                 message='User confirmation saved successfully'
@@ -155,10 +146,10 @@ def save_user_confirmation(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])  # Temporarily allow any access for debugging
 def get_user_confirmations(request):
-    """Get user confirmations for admin dashboard"""
+    """get confirmations list for admin dashboard"""
     try:
         
-        # Get query parameters
+        # get filter stuff
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('page_size', 20))
         filter_type = request.GET.get('filter', 'all')  # all, confirmed, rejected
@@ -166,14 +157,10 @@ def get_user_confirmations(request):
         disease = request.GET.get('disease')
         image_id = request.GET.get('image_id')  # Add this filter for admin panel
         
-        # Base queryset
+        # get all confirmations
         queryset = UserConfirmation.objects.select_related('image', 'user').all()
         
-        # Apply filters
-        if filter_type == 'confirmed':
-            queryset = queryset.filter(is_correct=True)
-        elif filter_type == 'rejected':
-            queryset = queryset.filter(is_correct=False)
+        # apply filters (is_correct removed so filter_type not used)
         
         if user_id:
             queryset = queryset.filter(user_id=user_id)
@@ -181,7 +168,7 @@ def get_user_confirmations(request):
         if disease:
             queryset = queryset.filter(predicted_disease__icontains=disease)
             
-        # Add image_id filter for admin panel requests
+        # add image filter for admin
         if image_id:
             try:
                 image_id_int = int(image_id)
@@ -189,7 +176,7 @@ def get_user_confirmations(request):
             except (ValueError, TypeError):
                 pass
 
-        # Pagination
+        # paging stuff
         total_count = queryset.count()
         
         start_index = (page - 1) * page_size
@@ -197,7 +184,7 @@ def get_user_confirmations(request):
         confirmations = queryset[start_index:end_index]
         
         
-        # Serialize data
+        # turn into json
         confirmation_data = []
         for conf in confirmations:
             
@@ -216,12 +203,9 @@ def get_user_confirmations(request):
                     'email': conf.user.email if conf.user else '',
                     'full_name': f"{conf.user.first_name} {conf.user.last_name}".strip() if conf.user else 'Anonymous'
                 },
-                'is_correct': conf.is_correct,
                 'predicted_disease': conf.predicted_disease,
                 'user_feedback': conf.user_feedback,
                 'confidence_score': conf.confidence_score,
-                'confirmed_at': conf.confirmed_at.isoformat(),
-                'created_at': conf.confirmed_at.isoformat(),  # Add this for compatibility
                 'location_consent_given': conf.location_consent_given,  # Add this for admin panel
                 'latitude': conf.latitude,  # Add direct fields for admin panel
                 'longitude': conf.longitude,
@@ -233,24 +217,15 @@ def get_user_confirmations(request):
                     'longitude': conf.longitude,
                     'accuracy': conf.location_accuracy,
                     'address': conf.location_address
-                } if conf.location_consent_given else None,
-                'client_ip': conf.client_ip
+                } if conf.location_consent_given else None
             }
             
             confirmation_data.append(confirmation_item)
         
-        # Calculate statistics
+        # get stats
         stats = {
-            'total_confirmations': total_count,
-            'confirmed_count': UserConfirmation.objects.filter(is_correct=True).count(),
-            'rejected_count': UserConfirmation.objects.filter(is_correct=False).count(),
-            'accuracy_rate': 0
+            'total_confirmations': total_count
         }
-        
-        if stats['total_confirmations'] > 0:
-            stats['accuracy_rate'] = round(
-                (stats['confirmed_count'] / stats['total_confirmations']) * 100, 2
-            )
         
         return JsonResponse(
             create_api_response(
@@ -284,41 +259,28 @@ def get_user_confirmations(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])  # Temporarily allow any access for debugging  
 def get_confirmation_statistics(request):
-    """Get detailed statistics about user confirmations"""
+    """get stats about user confirmations"""
     try:
-        # Overall stats
+        # overall stats
         total_confirmations = UserConfirmation.objects.count()
-        confirmed_count = UserConfirmation.objects.filter(is_correct=True).count()
-        rejected_count = UserConfirmation.objects.filter(is_correct=False).count()
         
-        # Disease-wise accuracy
+        # disease stats
         disease_stats = []
         diseases = UserConfirmation.objects.values('predicted_disease').distinct()
         
         for disease_data in diseases:
             disease = disease_data['predicted_disease']
             disease_total = UserConfirmation.objects.filter(predicted_disease=disease).count()
-            disease_confirmed = UserConfirmation.objects.filter(
-                predicted_disease=disease, is_correct=True
-            ).count()
-            disease_rejected = UserConfirmation.objects.filter(
-                predicted_disease=disease, is_correct=False
-            ).count()
-            
-            accuracy = (disease_confirmed / disease_total * 100) if disease_total > 0 else 0
             
             disease_stats.append({
                 'disease': disease,
-                'total_predictions': disease_total,
-                'confirmed': disease_confirmed,
-                'rejected': disease_rejected,
-                'accuracy_rate': round(accuracy, 2)
+                'total_predictions': disease_total
             })
         
-        # Sort by total predictions (most common diseases first)
+        # sort by most common
         disease_stats.sort(key=lambda x: x['total_predictions'], reverse=True)
         
-        # User engagement stats
+        # user stats
         users_with_confirmations = UserConfirmation.objects.filter(
             user__isnull=False
         ).values('user').distinct().count()
@@ -327,12 +289,10 @@ def get_confirmation_statistics(request):
             user__isnull=True
         ).count()
         
-        # Location data stats
+        # gps data stats
         confirmations_with_location = UserConfirmation.objects.filter(
             location_consent_given=True
         ).count()
-        
-        overall_accuracy = (confirmed_count / total_confirmations * 100) if total_confirmations > 0 else 0
         
         return JsonResponse(
             create_api_response(
@@ -340,9 +300,6 @@ def get_confirmation_statistics(request):
                 data={
                     'overall_statistics': {
                         'total_confirmations': total_confirmations,
-                        'confirmed_count': confirmed_count,
-                        'rejected_count': rejected_count,
-                        'overall_accuracy': round(overall_accuracy, 2),
                         'users_with_confirmations': users_with_confirmations,
                         'anonymous_confirmations': anonymous_confirmations,
                         'confirmations_with_location': confirmations_with_location

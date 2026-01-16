@@ -6,7 +6,7 @@ import uuid
 from PIL import Image
 
 def get_client_ip(request):
-    """Get client IP address"""
+    """get users ip address"""
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
         ip = x_forwarded_for.split(',')[0]
@@ -15,7 +15,7 @@ def get_client_ip(request):
     return ip
 
 def validate_password_strength(password):
-    """Validate password strength - minimum 8 characters"""
+    """check if password good enough"""
     errors = []
     if len(password) < 8:
         errors.append("Password must be at least 8 characters long.")
@@ -26,27 +26,27 @@ def validate_password_strength(password):
     return errors
 
 def validate_email_format(email):
-    """Basic email validation"""
+    """simple email check"""
     import re
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-# Additional utility functions for MangoSense
+# more helper stuff for mangosense
 
 def validate_image_file(image_file):
-    """Validate uploaded image file"""
+    """make sure image is ok"""
     errors = []
     
-    # Check file size (max 10MB)
+    # max 10mb
     if image_file.size > 10 * 1024 * 1024:
         errors.append("Image size must be less than 10MB")
     
-    # Check file type
+    # only these types allowed
     allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
     if image_file.content_type not in allowed_types:
         errors.append("Only JPEG, PNG, and WebP images are allowed")
     
-    # Check file extension
+    # check extension too
     allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
     file_extension = image_file.name.lower().split('.')[-1]
     if f'.{file_extension}' not in allowed_extensions:
@@ -55,12 +55,12 @@ def validate_image_file(image_file):
     return errors
 
 def get_disease_type(disease_name):
-    """Determine if disease affects leaf or fruit"""
+    """is it leaf or fruit disease"""
     fruit_diseases = ['Alternaria', 'Black Mould Rot', 'Stem End Rot']
     return 'fruit' if disease_name in fruit_diseases else 'leaf'
 
 def calculate_confidence_level(confidence_score):
-    """Convert confidence score to human readable level"""
+    """turn number into words"""
     if confidence_score >= 0.8:
         return 'High'
     elif confidence_score >= 0.6:
@@ -71,7 +71,7 @@ def calculate_confidence_level(confidence_score):
         return 'Very Low'
 
 def format_file_size(size_bytes):
-    """Convert bytes to human readable format"""
+    """make bytes readable like 5MB"""
     if size_bytes == 0:
         return "0 B"
     
@@ -83,18 +83,18 @@ def format_file_size(size_bytes):
     return f"{s} {size_names[i]}"
 
 def sanitize_filename(filename):
-    """Sanitize filename for safe storage"""
+    """clean up filename for storage"""
     import re
-    # Remove special characters and replace spaces with underscores
+    # remove weird chars and spaces
     filename = re.sub(r'[^\w\s-]', '', filename)
     filename = re.sub(r'[-\s]+', '_', filename)
     return filename
 
 def get_prediction_summary(predictions, class_names):
-    """Create a summary of ML predictions"""
+    """organize ai prediction results"""
     import numpy as np
     
-    # Get top 3 predictions
+    # get top 3
     top_3_indices = np.argsort(predictions)[-3:][::-1]
     
     summary = {
@@ -118,7 +118,7 @@ def get_prediction_summary(predictions, class_names):
     return summary
 
 def log_prediction_activity(user, image_id, prediction_result):
-    """Log prediction activity for analytics"""
+    """log prediction for analytics"""
     from django.utils import timezone
     import logging
     
@@ -137,7 +137,7 @@ def log_prediction_activity(user, image_id, prediction_result):
     return log_data
 
 def validate_admin_permissions(user):
-    """Validate if user has admin permissions"""
+    """check if user is admin"""
     if not user or not user.is_authenticated:
         return False, "Authentication required"
     
@@ -147,7 +147,7 @@ def validate_admin_permissions(user):
     return True, "Valid admin user"
 
 def paginate_queryset(queryset, page_number, page_size=20):
-    """Paginate queryset with error handling"""
+    """split results into pages"""
     from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
     
     paginator = Paginator(queryset, page_size)
@@ -173,7 +173,7 @@ def paginate_queryset(queryset, page_number, page_size=20):
     }
 
 def create_api_response(success=True, message="", data=None, errors=None, error_code=None, status_code=200):
-    """Create standardized API response"""
+    """make consistent api responses"""
     response_data = {
         'success': success,
         'message': message,

@@ -12,16 +12,16 @@ from .utils import validate_password_strength  # Import from utils to avoid dupl
 import json
 import uuid
 
-# Validation Functions
+# validation stuff
 def validate_name(name, field_name):
-    """Validate first name and last name"""
+    """check name is valid"""
     errors = []
     if not name or len(name.strip()) < 2:
         errors.append(f"{field_name} must be at least 2 characters long.")
     return errors
 
 def validate_address(address):
-    """Validate address field"""
+    """check address field"""
     errors = []
     if not address or len(address.strip()) < 5:
         errors.append("Address must be at least 5 characters long.")
@@ -29,7 +29,7 @@ def validate_address(address):
         errors.append("Address cannot exceed 200 characters.")
     return errors
 
-# Authentication Views
+# auth stuff
 def register_view(request):
     if request.method == 'GET':
         return render(request, 'mangosense/register.html')
@@ -42,13 +42,13 @@ def register_api(request):
         first_name = (data.get('first_name') or data.get('firstName', '')).strip()
         last_name = (data.get('last_name') or data.get('lastName', '')).strip()
         
-        # Handle location fields from frontend
+        # get location stuff from form
         province = data.get('province', '').strip()
         city = data.get('city', '').strip()
         barangay = data.get('barangay', '').strip()
         postal_code = data.get('postal_code') or data.get('postalCode', '').strip()
         
-        # Combine location fields into address or use existing address field
+        # combine location into address or use whats there
         address = data.get('address', '').strip()
         if not address and province and city and barangay:
             address = f"{barangay}, {city}, {province} {postal_code}".strip()
@@ -59,7 +59,7 @@ def register_api(request):
 
         errors = []
 
-        # Check required fields - allow either address OR location components
+        # make sure we got everything - either address or location parts
         required_location = address or (province and city and barangay)
         if not all([first_name, last_name, required_location, email, password]):
             return JsonResponse({
@@ -78,11 +78,11 @@ def register_api(request):
         errors.extend(validate_name(first_name, "First name"))
         errors.extend(validate_name(last_name, "Last name"))
         
-        # Validate address (either provided directly or constructed from location fields)
+        # check address stuff
         if address:
             errors.extend(validate_address(address))
         elif province and city and barangay:
-            # Validate individual location components
+            # validate location parts
             if not province.strip():
                 errors.append("Province is required.")
             if not city.strip():
@@ -111,19 +111,19 @@ def register_api(request):
                 'errors': errors
             }, status=400)
 
-        # Generate a unique username (not using email)
+        # make unique username not email
         base_username = (first_name + last_name).lower() or "user"
         unique_username = f"{base_username}_{uuid.uuid4().hex[:8]}"
 
         user = User.objects.create_user(
-            username=unique_username,  # Use generated username
+            username=unique_username,  # use generated name
             first_name=first_name,
             last_name=last_name,
             email=email,
             password=password
         )
 
-        # Create UserProfile with address information
+        # make profile with address
         UserProfile.objects.create(
             user=user,
             province=province,
@@ -133,7 +133,7 @@ def register_api(request):
             address=address
         )
 
-        # Create token for the new user
+        # make token for new user
         refresh = RefreshToken.for_user(user)
         access_token = refresh.access_token
 

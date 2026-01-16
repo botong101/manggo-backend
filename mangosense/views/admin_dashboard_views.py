@@ -19,45 +19,40 @@ from .ml_views import LEAF_MODEL_PATH, FRUIT_MODEL_PATH
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
-# ================ HELPER FUNCTIONS ================
+
 
 def get_actual_model_path(image):
     """
-    Get the actual model path from the stored model_filename in the database
+    figure out which model was used
     """
     model_filename = getattr(image, 'model_filename', None)
     if model_filename:
         model_path = f"models/{model_filename}"
         return model_path
     else:
-        # Fallback to old logic for existing records without model_filename
+        #fallback to old way
         disease_type = getattr(image, 'disease_type', 'leaf')
         import os
         if disease_type == 'fruit':
             model_path = f"models/{os.path.basename(FRUIT_MODEL_PATH)}"
             return model_path
-        else:  # Default to leaf
+        else: 
             model_path = f"models/{os.path.basename(LEAF_MODEL_PATH)}"
             return model_path
 
 def get_top_predictions_for_image(image):
-    """
-    Get top 3 predictions for an image, preferring stored PredictionLog data
-    """
+    #get top 3 from prediction log
     try:
-        # Try to get the most recent prediction log for this image
+        #grab latest prediction for this image
         prediction_log = PredictionLog.objects.filter(image=image).order_by('-timestamp').first()
         
         if prediction_log and prediction_log.probabilities and prediction_log.labels:
-            # Use stored prediction data
             probabilities = prediction_log.probabilities
             labels = prediction_log.labels
-            
-            # Create tuples of (probability, label) and sort by probability descending
+
             prob_label_pairs = list(zip(probabilities, labels))
             prob_label_pairs.sort(key=lambda x: x[0], reverse=True)
             
-            # Take top 3
             top_3_pairs = prob_label_pairs[:3]
             
             top_3_predictions = [
@@ -73,12 +68,12 @@ def get_top_predictions_for_image(image):
     except Exception as e:
         print(f"Error getting stored predictions: {e}")
     
-    # Fallback: create synthetic top 3 based on current prediction
+    # if no log just make something up
     predicted_class = image.predicted_class or "Unknown"
     confidence = image.confidence_score or 0.0
     
-    # Create 3 predictions with decreasing confidence
-    base_confidence = min(confidence, 0.95)  # Cap at 95%
+    # fake 3 predictions with lower confidence each
+    base_confidence = min(confidence, 0.95)  # max 95%
     
     top_3_predictions = [
         {
@@ -97,24 +92,22 @@ def get_top_predictions_for_image(image):
     
     return top_3_predictions
 
-# ================ PAGINATION ================
+#class StandardResultsSetPagination(PageNumberPagination):
+ #   page_size = 20
+  #  page_size_query_param = 'page_size'
+   # max_page_size = 100
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 100
-
-# ================ DISEASE STATISTICS VIEW ================
+# ================ STATS STUFF ================
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def disease_statistics(request):
-    """Get disease statistics for dashboard"""
+    """stats for dashboard"""
     try:
-        # Get total counts
+        #how many images total
         total_images = MangoImage.objects.count()
         
-        # Count healthy vs diseased based on predicted_class
+        #how many healthy
         healthy_images = MangoImage.objects.filter(
             Q(predicted_class__icontains='healthy') | 
             Q(predicted_class__icontains='Healthy')
@@ -122,7 +115,7 @@ def disease_statistics(request):
         
         diseased_images = total_images - healthy_images
         
-        # Count by disease type (leaf vs fruit)
+        #leaf vs fruit count
         leaf_images = MangoImage.objects.filter(
             predicted_class__icontains='Leaf'
         ).count()
@@ -131,7 +124,7 @@ def disease_statistics(request):
             predicted_class__icontains='Fruit'
         ).count()
         
-        # Get disease breakdown by predicted_class
+        #group by disease
         diseases_breakdown = {}
         disease_counts = MangoImage.objects.values('predicted_class').annotate(
             count=Count('id')
@@ -140,13 +133,13 @@ def disease_statistics(request):
         for disease in disease_counts:
             diseases_breakdown[disease['predicted_class']] = disease['count']
         
-        # Recent uploads (last 7 days) - using uploaded_at instead of upload_date
+        #last 7 days
         week_ago = timezone.now() - timedelta(days=7)
         recent_uploads = MangoImage.objects.filter(
             uploaded_at__gte=week_ago
         ).count()
         
-        # Monthly statistics
+        #last 30 days
         month_ago = timezone.now() - timedelta(days=30)
         monthly_uploads = MangoImage.objects.filter(
             uploaded_at__gte=month_ago
@@ -178,12 +171,13 @@ def disease_statistics(request):
             'error': f'Internal server error: {str(e)}'
         }, status=500)
 
-# ================ CLASSIFIED IMAGES VIEWS ================
+
+# ================ IMAGE LIST STUFF ================
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def classified_images_list(request):
-    """Get paginated list of classified images"""
+    """get list of images with pagination"""
     try:
         # Get query parameters
         page = int(request.GET.get('page', 1))
@@ -193,10 +187,10 @@ def classified_images_list(request):
         disease_type_filter = request.GET.get('disease_type', '')
         verified_filter = request.GET.get('verified', '')
         
-        # Build query
-        queryset = MangoImage.objects.all().order_by('-uploaded_at')  # Use uploaded_at
+        # build the query
+        queryset = MangoImage.objects.all().order_by('-uploaded_at')  # newest first
         
-        # Apply filters
+        # apply filters
         if search:
             queryset = queryset.filter(
                 Q(original_filename__icontains=search) |
@@ -246,7 +240,7 @@ def classified_images_list(request):
 @csrf_exempt 
 @require_http_methods(["GET", "PUT", "DELETE"])
 def classified_images_detail(request, pk):
-    """Get, update, or delete a specific classified image"""
+    """get update or delete single image"""
     try:
         image = MangoImage.objects.get(pk=pk)
         
@@ -292,12 +286,12 @@ def classified_images_detail(request, pk):
             'error': f'Internal server error: {str(e)}'
         }, status=500)
 
-# ================ MISSING VIEWS ================
+# ================ MORE VIEWS ================
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def bulk_update_images(request):
-    """Bulk update multiple images"""
+    """update bunch of images at once"""
     try:
         data = json.loads(request.body)
         serializer = BulkUpdateSerializer(data=data)
@@ -306,7 +300,7 @@ def bulk_update_images(request):
             image_ids = serializer.validated_data['image_ids']
             updates = serializer.validated_data['updates']
             
-            # Update images
+            # do the update
             updated_count = MangoImage.objects.filter(
                 id__in=image_ids
             ).update(**updates)
@@ -331,14 +325,14 @@ def bulk_update_images(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def upload_image(request):
-    """Upload a new image"""
+    """upload new image"""
     try:
         serializer = ImageUploadSerializer(data=request.FILES)
         
         if serializer.is_valid():
             image_file = serializer.validated_data['image']
             
-            # Create new MangoImage instance
+            # make new image record
             mango_image = MangoImage.objects.create(
                 image=image_file,
                 original_filename=image_file.name,
@@ -365,12 +359,12 @@ def upload_image(request):
 @csrf_exempt
 @require_http_methods(["GET"])
 def export_dataset(request):
-    """Export dataset"""
+    """dump all data"""
     try:
-        # Get all images
+        # get everything
         images = MangoImage.objects.all()
         
-        # Create export data
+        # build export list
         export_data = []
         for image in images:
             export_data.append({
@@ -396,23 +390,23 @@ def export_dataset(request):
             'error': f'Internal server error: {str(e)}'
         }, status=500)
 
-# ================ PREDICTION DETAILS ENDPOINTS ================
+# ================ PREDICTION DETAILS ================
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def image_prediction_details(request, pk):
-    """Get detailed prediction information for a specific image"""
+    """get all prediction info for one image"""
     try:
         image = MangoImage.objects.get(pk=pk)
         serializer = MangoImageSerializer(image, context={'request': request})
         
-        # Get top 3 predictions using helper function
+        # get top 3 using helper
         top_3_predictions = get_top_predictions_for_image(image)
         
-        # Create extended response with prediction details
+        # make response with all the details
         data = serializer.data
         
-        # Map predictions to frontend format
+        # format predictions for frontend
         formatted_predictions = []
         for i, pred in enumerate(top_3_predictions):
             confidence_score = pred['confidence'] * 100
@@ -425,7 +419,7 @@ def image_prediction_details(request, pk):
                 'detection_type': getattr(image, 'disease_type', 'leaf')
             })
         
-        # Add prediction data structure for compatibility with frontend
+        # add prediction stuff for frontend compatibility
         data['prediction_data'] = {
             'success': True,
             'message': 'Image processed successfully',
@@ -475,13 +469,12 @@ def image_prediction_details(request, pk):
 @csrf_exempt
 @require_http_methods(["POST"])
 def store_prediction_data(request, pk):
-    """Store detailed prediction data from mobile app"""
+    """save prediction data from mobile app"""
     try:
         image = MangoImage.objects.get(pk=pk)
         data = json.loads(request.body)
         
-        # Store the prediction data (you may need to add a JSONField to MangoImage model)
-        # For now, we'll just return success
+        # could store this in db later
         # image.prediction_data = data
         # image.save()
         
@@ -501,22 +494,22 @@ def store_prediction_data(request, pk):
             'error': f'Internal server error: {str(e)}'
         }, status=500)
 
-# ================ USER MANAGEMENT ENDPOINTS ================
+# ================ USER STUFF ================
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def users_list(request):
-    """Get paginated list of users with their profiles and image statistics"""
+    """get list of users with their info"""
     try:
         # Get query parameters
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('page_size', 20))
         search = request.GET.get('search', '')
         
-        # Build query
+        # build query
         queryset = User.objects.select_related('userprofile').prefetch_related('mangoimage_set').order_by('-date_joined')
         
-        # Apply search filter
+        # search filter
         if search:
             queryset = queryset.filter(
                 Q(first_name__icontains=search) |
@@ -531,7 +524,7 @@ def users_list(request):
         end = start + page_size
         users = queryset[start:end]
         
-        # Serialize data with detailed information
+        # turn into json
         serializer = UserDetailSerializer(users, many=True, context={'request': request})
         
         return JsonResponse({
@@ -558,7 +551,7 @@ def users_list(request):
 @csrf_exempt
 @require_http_methods(["GET", "PUT"])
 def user_detail(request, user_id):
-    """Get detailed information about a specific user or update user status"""
+    """get or update single user"""
     try:
         user = User.objects.select_related('userprofile').prefetch_related('mangoimage_set').get(id=user_id)
         
@@ -570,7 +563,7 @@ def user_detail(request, user_id):
             })
             
         elif request.method == 'PUT':
-            # Handle user status updates
+            # update user stuff
             import json
             try:
                 data = json.loads(request.body)
@@ -613,11 +606,11 @@ def user_detail(request, user_id):
 @csrf_exempt
 @require_http_methods(["GET"])
 def user_images(request, user_id):
-    """Get all images uploaded by a specific user"""
+    """get all images from one user"""
     try:
         user = User.objects.get(id=user_id)
         
-        # Get query parameters for filtering
+        # filters
         disease_type = request.GET.get('disease_type', '')
         verified = request.GET.get('verified', '')
         page = int(request.GET.get('page', 1))
@@ -678,20 +671,20 @@ def user_images(request, user_id):
 @csrf_exempt
 @require_http_methods(["GET"])
 def user_statistics(request):
-    """Get user statistics for the admin dashboard"""
+    """user stats for admin dashboard"""
     try:
         total_users = User.objects.count()
         active_users = User.objects.filter(is_active=True).count()
         inactive_users = total_users - active_users
         
-        # Users with profiles (location data)
+        # how many have profiles with location
         users_with_profiles = User.objects.filter(userprofile__isnull=False).count()
         
-        # User image statistics
+        # image stuff
         total_images = MangoImage.objects.count()
         average_images_per_user = total_images / total_users if total_users > 0 else 0
         
-        # Top users by image count
+        # who uploads most
         top_users = User.objects.annotate(
             image_count=Count('mangoimage')
         ).filter(image_count__gt=0).order_by('-image_count')[:5]
@@ -705,7 +698,7 @@ def user_statistics(request):
                 'image_count': user.image_count
             })
         
-        # Recent registrations (last 30 days)
+        # new users this month
         thirty_days_ago = timezone.now() - timedelta(days=30)
         recent_registrations = User.objects.filter(date_joined__gte=thirty_days_ago).count()
         

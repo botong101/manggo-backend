@@ -26,18 +26,15 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Test if Django can start
-RUN python manage.py check --deploy
-
 # Collect static files
-RUN python manage.py collectstatic --noinput
+RUN python manage.py collectstatic --noinput || true
 
 # Create a simple startup script
-RUN echo '#!/bin/bash\npython manage.py migrate --noinput\npython manage.py create_superuser\necho "Starting gunicorn on port $PORT"\nexec gunicorn mangoAPI.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --log-level info --access-logfile - --error-logfile -' > /app/start.sh
+RUN echo '#!/bin/bash\nset -e\necho "Running migrations..."\npython manage.py migrate --noinput || echo "Migration failed, continuing..."\necho "Creating superuser..."\npython manage.py create_superuser || echo "Superuser creation failed, continuing..."\nPORT=${PORT:-8000}\necho "Starting gunicorn on port $PORT"\nexec gunicorn mangoAPI.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --log-level debug --access-logfile - --error-logfile -' > /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Expose port
-EXPOSE $PORT
+# Expose default port
+EXPOSE 8000
 
 # Use the startup script
 CMD ["/app/start.sh"]

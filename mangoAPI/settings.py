@@ -78,7 +78,12 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost",       
     "https://localhost",     
     "capacitor://localhost",  
-    "ionic://localhost",      
+    "ionic://localhost",
+    # Production URLs
+    "https://manggo-admin-rwis.vercel.app",  # Vercel deployment
+    "https://manggo-admin-rwis-git-main-botong101s-projects.vercel.app",  # Vercel git URL
+    "https://manggo-admin-rwis-lpcbgh8xk-botong101s-projects.vercel.app",  # Vercel preview URL
+    "https://manggasense.up.railway.app",  # Railway backend
 ]
 
 CORS_ALLOW_HEADERS = [

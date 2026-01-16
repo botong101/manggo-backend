@@ -26,15 +26,14 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Collect static files (skip check to avoid build failures)
+# Collect static files
 RUN python manage.py collectstatic --noinput || true
 
-# Create a simple startup script with better error handling
-RUN echo '#!/bin/bash\nset -e\necho "Running migrations..."\npython manage.py migrate --noinput || echo "Migration warning - continuing"\necho "Creating superuser if needed..."\npython manage.py create_superuser || echo "Superuser exists or creation skipped"\nPORT=${PORT:-8000}\necho "Starting gunicorn on 0.0.0.0:$PORT"\nexec gunicorn mangoAPI.wsgi:application \\\n  --bind 0.0.0.0:$PORT \\\n  --workers 2 \\\n  --threads 4 \\\n  --worker-class gthread \\\n  --timeout 120 \\\n  --graceful-timeout 30 \\\n  --keep-alive 5 \\\n  --log-level info \\\n  --access-logfile - \\\n  --error-logfile -' > /app/start.sh
-RUN chmod +x /app/start.sh
+# Run migrations at build time
+RUN python manage.py migrate --noinput || true
 
 # Expose default port
 EXPOSE 8000
 
-# Use the startup script
-CMD ["/app/start.sh"]
+# Start gunicorn directly
+CMD ["sh", "-c", "gunicorn mangoAPI.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120 --log-level info"]

@@ -46,12 +46,11 @@ def register_api(request):
         province = data.get('province', '').strip()
         city = data.get('city', '').strip()
         barangay = data.get('barangay', '').strip()
-        postal_code = data.get('postal_code') or data.get('postalCode', '').strip()
         
         # combine location into address or use whats there
         address = data.get('address', '').strip()
         if not address and province and city and barangay:
-            address = f"{barangay}, {city}, {province} {postal_code}".strip()
+            address = f"{barangay}, {city}, {province}".strip()
         
         email = data.get('email', '').strip().lower()
         password = data.get('password', '')
@@ -129,7 +128,6 @@ def register_api(request):
             province=province,
             city=city,
             barangay=barangay,
-            postal_code=postal_code,
             address=address
         )
 

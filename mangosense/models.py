@@ -118,7 +118,6 @@ class UserProfile(models.Model):
     province = models.CharField(max_length=100, blank=True)
     city = models.CharField(max_length=100, blank=True)
     barangay = models.CharField(max_length=100, blank=True)
-    postal_code = models.CharField(max_length=20, blank=True)
     
     #full address 
     address = models.TextField(blank=True)
@@ -135,8 +134,6 @@ class UserProfile(models.Model):
                 address_parts.append(self.city)
             if self.province:
                 address_parts.append(self.province)
-            if self.postal_code:
-                address_parts.append(self.postal_code)
             self.address = ', '.join(address_parts)
         super().save(*args, **kwargs)
     

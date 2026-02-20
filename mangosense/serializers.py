@@ -26,10 +26,9 @@ class UserDetailSerializer(serializers.ModelSerializer):
                 'province': profile.province,
                 'city': profile.city,
                 'barangay': profile.barangay,
-                'postal_code': profile.postal_code,
                 'address': profile.address,
                 'phone': profile.phone,
-                'full_address': f"{profile.barangay}, {profile.city}, {profile.province} {profile.postal_code}".strip(', ') if profile.barangay else profile.address
+                'full_address': f"{profile.barangay}, {profile.city}, {profile.province}".strip(', ') if profile.barangay else profile.address
             }
         except UserProfile.DoesNotExist:
             return None
@@ -49,7 +48,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = UserProfile
-        fields = ['user', 'province', 'city', 'barangay', 'postal_code', 'address', 'full_address', 'phone', 'created_at']
+        fields = ['user', 'province', 'city', 'barangay', 'address', 'full_address', 'phone', 'created_at']
         read_only_fields = ['created_at', 'full_address']
     
     def get_full_address(self, obj):
@@ -61,8 +60,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
             address_parts.append(obj.city)
         if obj.province:
             address_parts.append(obj.province)
-        if obj.postal_code:
-            address_parts.append(obj.postal_code)
         return ', '.join(address_parts) if address_parts else obj.address
 
 class MangoImageSerializer(serializers.ModelSerializer):

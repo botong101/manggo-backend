@@ -16,8 +16,6 @@ import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-MODEL_PATH = os.path.join(BASE_DIR, 'models', 'leaf-efficientnetb0-model.keras')
-FRUIT_MODEL_PATH = os.path.join(BASE_DIR, 'models', 'fruit-efficientnetb0-model.keras')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/

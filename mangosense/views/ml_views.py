@@ -45,6 +45,8 @@ treatment_suggestions = {
     'Stem End Rot': 'Proper post-harvest handling and storage conditions are essential.'
 }
 
+
+
 def get_treatment_for_disease(disease_name):
    
     if not disease_name:
@@ -91,6 +93,9 @@ def preprocess_image(image_file):
         return img_array, original_size
     except Exception as e:
         raise e
+
+
+
 
 
 @api_view(['POST'])
@@ -468,6 +473,9 @@ def predict_image(request):
             ),
             status=500
         )
+
+
+
 
 
 @api_view(['GET'])

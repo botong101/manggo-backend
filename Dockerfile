@@ -26,6 +26,12 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
+# Debug: verify model files are present and are real binaries (not LFS pointers)
+RUN echo "=== Model files in /app/models/ ===" && \
+    ls -la /app/models/ && \
+    echo "=== Checking if files are LFS pointers ===" && \
+    head -c 50 /app/models/*.keras 2>/dev/null | cat -v || echo "No .keras files found"
+
 # Collect static files
 RUN python manage.py collectstatic --noinput || true
 

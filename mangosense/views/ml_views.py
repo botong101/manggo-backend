@@ -20,7 +20,7 @@ from .utils import (
 import tensorflow as tf
 
 # image size for model
-IMG_SIZE = (224, 224)
+IMG_SIZE = (240, 240)
 
 # diseases the leaf model knows
 LEAF_CLASS_NAMES = [
@@ -76,8 +76,8 @@ def get_treatment_for_disease(disease_name):
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
 #where the models are
-LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaf-mobilenetv2.keras')
-FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'mobilenetv2.keras')
+LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaves-mobilenetv2.keras')
+FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'fruit-mobilenetv2.keras')
 
 
 def preprocess_image(image_file):

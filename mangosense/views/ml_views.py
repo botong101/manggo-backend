@@ -44,11 +44,12 @@ GATE_FRUIT_CLASS_NAMES = [
 ]
 
 # index that means "valid mango" — adjust based on your training class order
-GATE_VALID_INDEX_LEAF = 4  # "Mango" is at index 5
+GATE_VALID_INDEX_LEAF = 4  # "Mango" is at index 4 (0-based)
 GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3
 
 # minimum gate confidence to let the image through
-GATE_CONFIDENCE_THRESHOLD = 50.0
+GATE_CONFIDENCE_THRESHOLD_LEAF = 40.0  # Lower threshold for diseased leaves
+GATE_CONFIDENCE_THRESHOLD_FRUIT = 50.0  # Can be stricter for fruits
 
 # ==================== DISEASE MODEL CLASS NAMES ====================
 # diseases the leaf model knows
@@ -167,8 +168,6 @@ def preprocess_image(image_file):
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def predict_image(request):
-    
-    import time
     start_time = time.time()
     
     # debug
@@ -201,31 +200,31 @@ def predict_image(request):
         
         # get symptoms they picked
         try:
-            selected_symptoms = json.loads(request.data.get('selected_symptoms', '[]')) if request.data.get('selected_symptoms') else []
+            selected_symptoms = json.loads(request.data.get('selected_symptoms', '[]'))
         except (json.JSONDecodeError, TypeError):
             selected_symptoms = []
             
         try:
-            primary_symptoms = json.loads(request.data.get('primary_symptoms', '[]')) if request.data.get('primary_symptoms') else []
+            primary_symptoms = json.loads(request.data.get('primary_symptoms', '[]'))
         except (json.JSONDecodeError, TypeError):
             primary_symptoms = []
             
         try:
-            alternative_symptoms = json.loads(request.data.get('alternative_symptoms', '[]')) if request.data.get('alternative_symptoms') else []
+            alternative_symptoms = json.loads(request.data.get('alternative_symptoms', '[]'))
         except (json.JSONDecodeError, TypeError):
             alternative_symptoms = []
             
         detected_disease = request.data.get('detected_disease', '')
         
         try:
-            top_diseases = json.loads(request.data.get('top_diseases', '[]')) if request.data.get('top_diseases') else []
+            plant_part_affected = json.loads(request.data.get('plant_part_affected', '[]'))
         except (json.JSONDecodeError, TypeError):
-            top_diseases = []
+            plant_part_affected = []
             
         try:
-            symptoms_data = json.loads(request.data.get('symptoms_data', '{}')) if request.data.get('symptoms_data') else {}
+            environmental_factors = json.loads(request.data.get('environmental_factors', '[]'))
         except (json.JSONDecodeError, TypeError):
-            symptoms_data = {}
+            environmental_factors = []
         
         # make sure image is ok
         validation_errors = validate_image_file(image_file)
@@ -233,7 +232,7 @@ def predict_image(request):
             return JsonResponse(
                 create_api_response(
                     success=False,
-                    message='Invalid image file',
+                    message='Image validation failed',
                     errors=validation_errors
                 ),
                 status=400
@@ -249,18 +248,11 @@ def predict_image(request):
                     message='Image preprocessing failed',
                     errors=[str(preprocessing_error)]
                 ),
-                status=500
+                status=400
             )
 
         # fruit or leaf?
         detection_type = request.data.get('detection_type', 'leaf')
-        
-        # gps stuff again
-        latitude = request.data.get('latitude')
-        longitude = request.data.get('longitude')
-        location_accuracy_confirmed = request.data.get('location_accuracy_confirmed', 'false').lower() == 'true'
-        location_source = request.data.get('location_source', '')
-        location_address = request.data.get('location_address', '')
 
         # ================================================================
         #  STAGE 1 — GATE MODEL (is this a mango leaf/fruit?)
@@ -271,96 +263,74 @@ def predict_image(request):
         gate_passed = True
         gate_confidence = None
         gate_prediction_label = None
+        gate_predicted_class = None
+        mango_confidence = None
 
         if os.path.exists(gate_model_path):
             try:
                 gate_model = tf.keras.models.load_model(gate_model_path)
-                gate_pred = gate_model.predict(img_array)
+                gate_pred = gate_model.predict(img_array, verbose=0)
                 gate_pred = np.array(gate_pred).flatten()
 
                 if detection_type == 'fruit':
                     valid_idx = GATE_VALID_INDEX_FRUIT
                     gate_cls = GATE_FRUIT_CLASS_NAMES
+                    threshold = GATE_CONFIDENCE_THRESHOLD_FRUIT
                 else:
                     valid_idx = GATE_VALID_INDEX_LEAF
                     gate_cls = GATE_LEAF_CLASS_NAMES
+                    threshold = GATE_CONFIDENCE_THRESHOLD_LEAF
 
-                gate_confidence = float(gate_pred[valid_idx]) * 100
+                # Get the predicted class and its confidence
                 gate_predicted_idx = int(np.argmax(gate_pred))
                 gate_prediction_label = gate_cls[gate_predicted_idx]
+                gate_confidence = float(gate_pred[gate_predicted_idx]) * 100.0
+                
+                # Get mango class confidence specifically
+                mango_confidence = float(gate_pred[valid_idx]) * 100.0
 
-                gate_passed = (
-                    gate_predicted_idx == valid_idx
-                    and gate_confidence >= GATE_CONFIDENCE_THRESHOLD
-                )
+                # NEW LOGIC: Check BOTH predicted class AND mango confidence
+                # This matches your reference code structure
+                if gate_predicted_idx != valid_idx or mango_confidence < threshold:
+                    gate_passed = False
+                    
+                    # Log why it failed
+                    if gate_predicted_idx != valid_idx:
+                        print(f"❌ Gate failed: Predicted '{gate_prediction_label}' (not Mango)")
+                    if mango_confidence < threshold:
+                        print(f"❌ Gate failed: Mango confidence {mango_confidence:.2f}% < {threshold}%")
+                else:
+                    print(f"✅ Gate passed: {gate_prediction_label} @ {gate_confidence:.2f}%, Mango @ {mango_confidence:.2f}%")
 
                 # free memory
                 del gate_model
                 gc.collect()
 
             except Exception as gate_err:
-                print(f"Gate model error: {gate_err} — skipping validation")
+                print(f"Gate model error: {gate_err} — allowing image through")
+                gate_passed = True
         else:
-            print(f"Gate model not found at {gate_model_path} — skipping validation")
+            print(f"Gate model not found at {gate_model_path} — allowing image through")
 
         # ---- gate rejected → return early ----
         if not gate_passed:
-            part = detection_type.capitalize()  # "Leaf" or "Fruit"
             return JsonResponse(
                 create_api_response(
-                    success=True,
+                    success=False,
+                    message=f'Image rejected: Not a valid mango {detection_type}',
                     data={
-                        'primary_prediction': {
-                            'disease': f'Not a Mango {part}',
-                            'confidence': f"{gate_confidence:.2f}%",
-                            'confidence_score': gate_confidence or 0,
-                            'confidence_level': 'Low',
-                            'treatment': (
-                                f"The uploaded image does not appear to be a mango {detection_type}. "
-                                f"Please upload a clear image of a mango {detection_type} and try again."
-                            ),
-                            'detection_type': detection_type
-                        },
-                        'top_3_predictions': [],
-                        'prediction_summary': {
-                            'most_likely': f'Not a Mango {part}',
-                            'confidence_level': 'Low',
-                            'total_diseases_checked': 0
-                        },
-                        'alternative_symptoms': {
-                            'primary_disease': f'Not a Mango {part}',
-                            'primary_disease_symptoms': [],
-                            'alternative_diseases': []
-                        },
-                        'user_verification': {
-                            'selected_symptoms': [],
-                            'primary_symptoms': [],
-                            'alternative_symptoms': [],
-                            'detected_disease': f'Not a Mango {part}',
-                            'is_detection_correct': False,
-                            'user_feedback': ''
-                        },
                         'gate_validation': {
                             'passed': False,
-                            'gate_prediction': gate_prediction_label,
-                            'gate_confidence': gate_confidence,
-                            'message': f'Image classified as "{gate_prediction_label}" by gate model'
+                            'predicted_class': gate_prediction_label,
+                            'predicted_confidence': f"{gate_confidence:.2f}%" if gate_confidence else None,
+                            'mango_confidence': f"{mango_confidence:.2f}%" if mango_confidence else None,
+                            'required_confidence': f"{threshold:.0f}%",
+                            'message': f'Predicted as "{gate_prediction_label}" with {gate_confidence:.2f}% confidence. Mango confidence: {mango_confidence:.2f}% (required: ≥{threshold:.0f}%)'
                         },
-                        'saved_image_id': None,
-                        'model_used': detection_type,
-                        'debug_info': {
-                            'gate_model_used': True,
-                            'gate_model_path': gate_model_path,
-                            'processing_time': time.time() - start_time,
-                            'image_size': original_size,
-                            'processed_size': IMG_SIZE
-                        }
-                    },
-                    message=(
-                        f'The uploaded image does not appear to be a mango {detection_type}. '
-                        f'Please upload a clear image of a mango {detection_type}.'
-                    )
-                )
+                        'detection_type': detection_type
+                    }
+                ),
+                status=400
             )
 
         # ================================================================
@@ -370,33 +340,32 @@ def predict_image(request):
         # pick which model to use
         if detection_type == 'fruit':
             model_path = get_active_model_path('fruit')
-            model_used = 'fruit'
             model_class_names = FRUIT_CLASS_NAMES
+            model_used = 'fruit'
         else:
             model_path = get_active_model_path('leaf')
-            model_used = 'leaf'
             model_class_names = LEAF_CLASS_NAMES
-
+            model_used = 'leaf'
 
         # check model file exists
         if not os.path.exists(model_path):
             return JsonResponse(
                 create_api_response(
                     success=False,
-                    message=f'Model file not found: {model_used}',
-                    errors=[f'Model file {model_path} does not exist']
+                    message='Model file not found',
+                    errors=[f'Model path: {model_path}']
                 ),
                 status=500
             )
 
         # load the ai model
         try:
-            model = tf.keras.models.load_model(model_path)
+            disease_model = tf.keras.models.load_model(model_path)
         except Exception as model_error:
             return JsonResponse(
                 create_api_response(
                     success=False,
-                    message='Failed to load ML model',
+                    message='Failed to load model',
                     errors=[str(model_error)]
                 ),
                 status=500
@@ -404,13 +373,14 @@ def predict_image(request):
 
         # run it thru the model
         try:
-            prediction = model.predict(img_array)
-            prediction = np.array(prediction).flatten()
+            prediction = disease_model.predict(img_array, verbose=0)
+            del disease_model
+            gc.collect()
         except Exception as prediction_error:
             return JsonResponse(
                 create_api_response(
                     success=False,
-                    message='ML prediction failed',
+                    message='Prediction failed',
                     errors=[str(prediction_error)]
                 ),
                 status=500
@@ -424,156 +394,52 @@ def predict_image(request):
 
         # if too low just say unknown
         if prediction_summary['primary_prediction']['confidence'] < CONFIDENCE_THRESHOLD:
-            unknown_response = {
-                'disease': 'Unknown',
-                'confidence': f"{prediction_summary['primary_prediction']['confidence']:.2f}%",
-                'confidence_score': prediction_summary['primary_prediction']['confidence'],
-                'confidence_level': 'Low',
-                'treatment': "The uploaded image could not be confidently classified. Please ensure the image is of a mango leaf or fruit and try again.",
-                'detection_type': model_used
-            }
-            response_data = {
-                'primary_prediction': unknown_response,
-                'top_3_predictions': [],
-                'prediction_summary': {
-                    'most_likely': 'Unknown',
-                    'confidence_level': 'Low',
-                    'total_diseases_checked': len(model_class_names)
-                },
-                'alternative_symptoms': {
-                    'primary_disease': 'Unknown',
-                    'primary_disease_symptoms': [],
-                    'alternative_diseases': []
-                },
-                'user_verification': {
-                    'selected_symptoms': [],
-                    'primary_symptoms': [],
-                    'alternative_symptoms': [],
-                    'detected_disease': 'Unknown',
-                    'is_detection_correct': False,
-                    'user_feedback': ''
-                },
-                'gate_validation': {
-                    'passed': True,
-                    'gate_prediction': gate_prediction_label,
-                    'gate_confidence': gate_confidence,
-                    'message': f'Image validated as mango {detection_type}'
-                },
-                'saved_image_id': None,
-                'model_used': model_used,
-                'model_path': model_path,
-                'debug_info': {
-                    'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
-                    'model_loaded': True,
-                    'image_size': original_size,
-                    'processed_size': IMG_SIZE
-                }
-            }
-            return JsonResponse(
-                create_api_response(
-                    success=True,
-                    data=response_data,
-                    message='Could not confidently classify the image. Please upload a clear image of a mango leaf or fruit.'
-                )
-            )
+            prediction_summary['primary_prediction']['disease'] = 'Unknown'
+            prediction_summary['confidence_level'] = 'Very Low'
 
         # add treatment info
         for pred in prediction_summary['top_3']:
             pred['treatment'] = get_treatment_for_disease(pred['disease'])
-            pred['detection_type'] = model_used
 
         # frontend will handle symptoms itself
-        # it has getDiseaseSymptoms() for that
         primary_disease = prediction_summary['primary_prediction']['disease']
-        alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]  # top 2-3 diseases
+        alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]
 
         # save to db unless just preview
         saved_image_id = None
         if not preview_only:
             try:
                 image_file.seek(0)
-                
-                # set up location data for saving
-                location_data = {}
-                if latitude and longitude:
-                    try:
-                        location_data.update({
-                            'latitude': float(latitude),
-                            'longitude': float(longitude),
-                            'location_consent_given': True,  # Consent was given during registration
-                            'location_accuracy_confirmed': location_accuracy_confirmed,
-                            'location_source': location_source,
-                            'location_address': location_address,
-                        })
-                    except (ValueError, TypeError) as e:
-                        location_data.update({
-                            'location_consent_given': False,
-                            'location_accuracy_confirmed': False,
-                        })
-                else:
-                    location_data.update({
-                        'location_consent_given': False,
-                        'location_accuracy_confirmed': False,
-                    })
-                
-                # how long did it take
-                processing_time = time.time() - start_time
-                
                 mango_image = MangoImage.objects.create(
                     image=image_file,
-                    original_filename=image_file.name,
-                    predicted_class=prediction_summary['primary_prediction']['disease'],
                     disease_classification=prediction_summary['primary_prediction']['disease'],
-                    disease_type=model_used, 
-                    model_used=model_used,  # Store which model was actually used
-                    model_filename=os.path.basename(model_path),  # Store the actual model filename
-                    confidence_score=prediction_summary['primary_prediction']['confidence'] / 100,
-                    user=request.user if request.user.is_authenticated else None,
-                    image_size=f"{original_size[0]}x{original_size[1]}",
-                    processing_time=processing_time,
-                    notes=f"Predicted via mobile app with {prediction_summary['primary_prediction']['confidence']:.2f}% confidence",
-                    is_verified=False,  # Always default to unverified - admin must manually verify
-                    user_feedback=user_feedback if user_feedback else None,  # User feedback can be NULL
-                    user_confirmed_correct=is_detection_correct if user_feedback else None,  # Save user confirmation decision
-                    # Add symptoms data
-                    selected_symptoms=selected_symptoms if selected_symptoms else None,
-                    primary_symptoms=primary_symptoms if primary_symptoms else None,
-                    alternative_symptoms=alternative_symptoms if alternative_symptoms else None,
-                    detected_disease=detected_disease if detected_disease else prediction_summary['primary_prediction']['disease'],
-                    top_diseases=top_diseases if top_diseases else None,
-                    symptoms_data=symptoms_data if symptoms_data else None,
-                    **location_data  # Add all location data
+                    confidence_score=prediction_summary['primary_prediction']['confidence'],
+                    detection_type=model_used,
+                    ip_address=get_client_ip(request),
+                    latitude=latitude,
+                    longitude=longitude,
+                    location_accuracy_confirmed=location_accuracy_confirmed,
+                    location_source=location_source,
+                    location_address=location_address,
+                    selected_symptoms=selected_symptoms,
+                    primary_symptoms=primary_symptoms,
+                    alternative_symptoms=alternative_symptoms,
+                    detected_disease=detected_disease,
+                    is_detection_correct=is_detection_correct,
+                    user_feedback=user_feedback,
+                    plant_part_affected=plant_part_affected,
+                    environmental_factors=environmental_factors
                 )
-                log_prediction_activity(request.user, mango_image.id, prediction_summary)
                 saved_image_id = mango_image.id
                 
-                # make notif for admin
-                try:
-                    # get user who uploaded or find an admin
-                    notification_user = mango_image.user if mango_image.user else None
-                    
-                    # if nobody logged in grab admin for notif
-                    if not notification_user:
-                        from django.contrib.auth.models import User
-                        notification_user = User.objects.filter(is_staff=True).first()
-                    
-                    if notification_user:
-                        # make the notification
-                        Notification.objects.create(
-                            notification_type='image_upload',
-                            title=f'New {model_used.title()} Image Upload',
-                            message=f'A new {model_used} image "{mango_image.original_filename}" was uploaded and classified as {prediction_summary["primary_prediction"]["disease"]} with {prediction_summary["primary_prediction"]["confidence"]:.1f}% confidence.',
-                            related_image=mango_image,
-                            user=notification_user
-                        )
-                    else:
-                        print(f"No user available for notification creation")
-                except Exception as notification_error:
-                    print(f"Error creating notification: {notification_error}")
-                    # dont break everything if notif fails
-            except Exception as e:
-                print(f"Error saving image to database: {e}")
-                saved_image_id = None
+                log_prediction_activity(
+                    user=request.user if request.user.is_authenticated else None,
+                    image=mango_image,
+                    prediction_result=prediction_summary['primary_prediction']['disease'],
+                    confidence=prediction_summary['primary_prediction']['confidence']
+                )
+            except Exception as db_error:
+                print(f"Database save error: {db_error}")
 
         # clean up memory
         gc.collect()
@@ -595,8 +461,8 @@ def predict_image(request):
             },
             'alternative_symptoms': {
                 'primary_disease': primary_disease,
-                'primary_disease_symptoms': [],  # Frontend will generate using getDiseaseSymptoms()
-                'alternative_diseases': alternative_diseases  # Just disease names, frontend will get symptoms
+                'primary_disease_symptoms': [],
+                'alternative_diseases': alternative_diseases
             },
             'user_verification': {
                 'selected_symptoms': selected_symptoms,
@@ -606,11 +472,11 @@ def predict_image(request):
                 'is_detection_correct': is_detection_correct,
                 'user_feedback': user_feedback
             },
-            # gate validation info for frontend
             'gate_validation': {
                 'passed': True,
-                'gate_prediction': gate_prediction_label,
-                'gate_confidence': gate_confidence,
+                'predicted_class': gate_prediction_label,
+                'predicted_confidence': f"{gate_confidence:.2f}%" if gate_confidence else None,
+                'mango_confidence': f"{mango_confidence:.2f}%" if mango_confidence else None,
                 'message': f'Image validated as mango {detection_type}'
             },
             'model_used': model_used,
@@ -619,28 +485,20 @@ def predict_image(request):
                 'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                 'model_loaded': True,
                 'image_size': original_size,
-                'processed_size': IMG_SIZE
+                'processed_size': IMG_SIZE,
+                'gate_threshold': threshold if 'threshold' in locals() else None
             }
         }
         
         # only add image id if we actually saved it
         if not preview_only and saved_image_id:
-            response_data['saved_image_id'] = saved_image_id
+            response_data['image_id'] = saved_image_id
+            
         try:
-            probs_list = prediction.tolist() if hasattr(prediction, 'tolist') else list(map(float, prediction))
-            labels_list = model_class_names
-            response_time = time.time() - start_time
-            PredictionLog.objects.create(
-                image=mango_image if 'mango_image' in locals() else None,
-                user_agent=request.META.get('HTTP_USER_AGENT', ''),
-                response_time=response_time,
-                probabilities=probs_list,
-                labels=labels_list,
-                prediction_summary=prediction_summary,
-                raw_response=response_data
-            )
+            execution_time = time.time() - start_time
+            response_data['execution_time'] = f"{execution_time:.2f}s"
         except Exception as e:
-            print(f"Failed to log prediction activity: {str(e)}")
+            print(f"Error calculating execution time: {e}")
 
         return JsonResponse(
             create_api_response(
@@ -659,10 +517,6 @@ def predict_image(request):
             ),
             status=500
         )
-
-
-
-
 
 @api_view(['GET'])
 def test_model_status(request):
@@ -693,7 +547,10 @@ def test_model_status(request):
             'leaf_classes_count': len(LEAF_CLASS_NAMES),
             'fruit_classes_count': len(FRUIT_CLASS_NAMES),
             'treatment_suggestions_count': len(treatment_suggestions),
-            'gate_confidence_threshold': GATE_CONFIDENCE_THRESHOLD,
+            'gate_confidence_threshold': {
+                'leaf': GATE_CONFIDENCE_THRESHOLD_LEAF,
+                'fruit': GATE_CONFIDENCE_THRESHOLD_FRUIT
+            },
             'active_model': {
                 'name': active_model.name if active_model else None,
                 'version': active_model.version if active_model else None,

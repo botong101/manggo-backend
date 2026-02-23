@@ -286,19 +286,40 @@ def predict_image(request):
                 if detection_type == 'fruit':
                     valid_idx = GATE_VALID_INDEX_FRUIT
                     gate_cls = GATE_FRUIT_CLASS_NAMES
+                    threshold = GATE_CONFIDENCE_THRESHOLD_FRUIT
                 else:
                     valid_idx = GATE_VALID_INDEX_LEAF
                     gate_cls = GATE_LEAF_CLASS_NAMES
+                    threshold = GATE_CONFIDENCE_THRESHOLD_LEAF
 
-                gate_confidence = float(gate_pred[valid_idx]) * 100
+                # Get the predicted class and its confidence
                 gate_predicted_idx = int(np.argmax(gate_pred))
                 gate_prediction_label = gate_cls[gate_predicted_idx]
-
-                threshold = GATE_CONFIDENCE_THRESHOLD_FRUIT if detection_type == 'fruit' else GATE_CONFIDENCE_THRESHOLD_LEAF
-                gate_passed = (
-                    gate_predicted_idx == valid_idx
-                    and gate_confidence >= threshold
-                )
+                gate_predicted_confidence = float(gate_pred[gate_predicted_idx]) * 100
+                
+                # Get mango confidence specifically
+                mango_confidence = float(gate_pred[valid_idx]) * 100
+                gate_confidence = mango_confidence  # For response
+                
+                # STRICT VALIDATION:
+                # 1. The highest predicted class MUST be "Mango"
+                # 2. AND the mango confidence must be above threshold
+                is_mango_predicted = (gate_predicted_idx == valid_idx)
+                is_confidence_sufficient = (mango_confidence >= threshold)
+                
+                gate_passed = is_mango_predicted and is_confidence_sufficient
+                
+                # Debug logging
+                print(f"=== GATE VALIDATION DEBUG ===")
+                print(f"Detection type: {detection_type}")
+                print(f"Gate predictions: {dict(zip(gate_cls, [f'{p*100:.2f}%' for p in gate_pred]))}")
+                print(f"Predicted class: {gate_prediction_label} ({gate_predicted_confidence:.2f}%)")
+                print(f"Mango confidence: {mango_confidence:.2f}%")
+                print(f"Threshold: {threshold}%")
+                print(f"Is Mango predicted: {is_mango_predicted}")
+                print(f"Is confidence sufficient: {is_confidence_sufficient}")
+                print(f"GATE PASSED: {gate_passed}")
+                print(f"=============================")
 
                 # free memory
                 del gate_model
@@ -312,6 +333,13 @@ def predict_image(request):
         # ---- gate rejected → return early ----
         if not gate_passed:
             part = detection_type.capitalize()  # "Leaf" or "Fruit"
+            
+            # Build a more informative rejection message
+            if gate_prediction_label and gate_prediction_label.lower() != 'mango':
+                rejection_detail = f'The image appears to be a {gate_prediction_label} {detection_type}, not a Mango {detection_type}.'
+            else:
+                rejection_detail = f'The image does not appear to be a clear Mango {detection_type}. Mango confidence: {gate_confidence:.1f}%'
+            
             return JsonResponse(
                 create_api_response(
                     success=True,
@@ -322,7 +350,7 @@ def predict_image(request):
                             'confidence_score': gate_confidence or 0,
                             'confidence_level': 'Low',
                             'treatment': (
-                                f"The uploaded image does not appear to be a mango {detection_type}. "
+                                f"{rejection_detail} "
                                 f"Please upload a clear image of a mango {detection_type} and try again."
                             ),
                             'detection_type': detection_type
@@ -349,8 +377,10 @@ def predict_image(request):
                         'gate_validation': {
                             'passed': False,
                             'gate_prediction': gate_prediction_label,
-                            'gate_confidence': gate_confidence,
-                            'message': f'Image classified as "{gate_prediction_label}" by gate model'
+                            'gate_predicted_confidence': gate_predicted_confidence if 'gate_predicted_confidence' in locals() else None,
+                            'mango_confidence': gate_confidence,
+                            'threshold': threshold if 'threshold' in locals() else GATE_CONFIDENCE_THRESHOLD,
+                            'message': rejection_detail
                         },
                         'saved_image_id': None,
                         'model_used': detection_type,
@@ -362,10 +392,7 @@ def predict_image(request):
                             'processed_size': IMG_SIZE
                         }
                     },
-                    message=(
-                        f'The uploaded image does not appear to be a mango {detection_type}. '
-                        f'Please upload a clear image of a mango {detection_type}.'
-                    )
+                    message=rejection_detail
                 )
             )
 

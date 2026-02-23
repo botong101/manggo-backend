@@ -10,6 +10,7 @@ import os
 import gc
 import json
 import time
+from io import BytesIO
 from ..models import MangoImage, MLModel, PredictionLog, Notification
 from .utils import (
     get_client_ip, validate_image_file, get_disease_type,
@@ -152,12 +153,28 @@ def preprocess_image(image_file):
     All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
-        # Handle Django's InMemoryUploadedFile - seek to beginning
-        if hasattr(image_file, 'seek'):
-            image_file.seek(0)
+        # Read file content into memory using BytesIO
+        # This is more reliable than directly reading InMemoryUploadedFile
+        if hasattr(image_file, 'read'):
+            # Read the entire file content
+            image_file.seek(0)  # Ensure we're at the beginning
+            file_content = image_file.read()
+            
+            # Verify file is not empty
+            if not file_content:
+                raise Exception("Uploaded file is empty")
+            
+            # Create BytesIO object from content
+            image_bytes = BytesIO(file_content)
+            
+            # Open with PIL
+            img = Image.open(image_bytes)
+        else:
+            # Fallback for file paths
+            img = Image.open(image_file)
         
-        # Open with PIL
-        img = Image.open(image_file).convert('RGB')
+        # Convert to RGB (handles PNG, RGBA, etc.)
+        img = img.convert('RGB')
         original_size = img.size
         
         # Resize to model input size
@@ -174,6 +191,8 @@ def preprocess_image(image_file):
         print(f"Image preprocessing error: {e}")
         print(f"Image file type: {type(image_file)}")
         print(f"Image file name: {getattr(image_file, 'name', 'unknown')}")
+        if hasattr(image_file, 'size'):
+            print(f"Image file size: {image_file.size} bytes")
         raise Exception(f"Failed to preprocess image: {str(e)}")
 
 

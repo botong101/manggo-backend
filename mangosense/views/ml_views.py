@@ -1,5 +1,4 @@
-from rest_framework.decorators import api_view, parser_classes, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.http import JsonResponse
 from django.conf import settings
@@ -10,9 +9,6 @@ import os
 import gc
 import json
 import time
-import base64
-import re
-from io import BytesIO
 from ..models import MangoImage, MLModel, PredictionLog, Notification
 from .utils import (
     get_client_ip, validate_image_file, get_disease_type,
@@ -54,6 +50,7 @@ GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3 in the fruit gate list
 # Minimum gate confidence thresholds
 GATE_CONFIDENCE_THRESHOLD_LEAF = 40.0  # More lenient for diseased leaves
 GATE_CONFIDENCE_THRESHOLD_FRUIT = 50.0
+GATE_CONFIDENCE_THRESHOLD = 50.0  # Default threshold
 
 # ==================== DISEASE MODEL CLASS NAMES ====================
 # diseases the leaf model knows
@@ -139,25 +136,6 @@ def get_active_model_path(detection_type: str, is_gate: bool = False) -> str:
     return os.path.join(settings.BASE_DIR, 'models', filename)
 
 
-def decode_base64_image(data):
-    """
-    Decode base64 image data to bytes.
-    Handles data URLs (data:image/jpeg;base64,...) and raw base64 strings.
-    """
-    # Check if it's a data URL
-    if isinstance(data, str):
-        # Remove data URL prefix if present
-        if data.startswith('data:'):
-            # Extract base64 part after the comma
-            match = re.match(r'data:image/[^;]+;base64,(.+)', data)
-            if match:
-                data = match.group(1)
-        
-        # Decode base64
-        return base64.b64decode(data)
-    return data
-
-
 def preprocess_image(image_file):
     """
     Preprocessing for inference.
@@ -174,89 +152,15 @@ def preprocess_image(image_file):
     All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
-        file_content = None
-        
-        # Handle different input types
-        if hasattr(image_file, 'read'):
-            # It's a file-like object (InMemoryUploadedFile, etc.)
-            image_file.seek(0)
-            file_content = image_file.read()
-            print(f"Read {len(file_content)} bytes from file-like object")
-        elif isinstance(image_file, bytes):
-            file_content = image_file
-            print(f"Received {len(file_content)} raw bytes")
-        elif isinstance(image_file, str):
-            # Could be base64 encoded or a file path
-            if os.path.exists(image_file):
-                with open(image_file, 'rb') as f:
-                    file_content = f.read()
-                print(f"Read {len(file_content)} bytes from file path")
-            else:
-                # Assume base64
-                file_content = decode_base64_image(image_file)
-                print(f"Decoded {len(file_content)} bytes from base64")
-        else:
-            raise Exception(f"Unsupported image input type: {type(image_file)}")
-        
-        # Verify file is not empty
-        if not file_content:
-            raise Exception("Uploaded file is empty")
-        
-        # Check for base64-encoded content in binary data
-        # Sometimes the frontend sends base64 as a string inside the file
-        if file_content[:5] == b'data:' or file_content[:20].startswith(b'data:image'):
-            print("Detected base64 data URL in file content")
-            file_content = decode_base64_image(file_content.decode('utf-8'))
-        
-        # Log first few bytes for debugging
-        print(f"First 20 bytes: {file_content[:20]}")
-        
-        # Check for common image magic bytes
-        is_jpeg = file_content[:2] == b'\xff\xd8'
-        is_png = file_content[:8] == b'\x89PNG\r\n\x1a\n'
-        is_gif = file_content[:6] in (b'GIF87a', b'GIF89a')
-        is_webp = file_content[:4] == b'RIFF' and file_content[8:12] == b'WEBP'
-        print(f"Image format detection - JPEG: {is_jpeg}, PNG: {is_png}, GIF: {is_gif}, WebP: {is_webp}")
-        
-        if not (is_jpeg or is_png or is_gif or is_webp):
-            # Try to decode as base64 if it looks like text
-            try:
-                decoded = base64.b64decode(file_content)
-                if decoded[:2] == b'\xff\xd8' or decoded[:8] == b'\x89PNG\r\n\x1a\n':
-                    print("Successfully decoded raw base64 to image bytes")
-                    file_content = decoded
-            except Exception:
-                pass  # Not base64, continue with original content
-        
-        # Create BytesIO and open with PIL
-        image_bytes = BytesIO(file_content)
-        img = Image.open(image_bytes)
-        
-        # Convert to RGB (handles PNG, RGBA, etc.)
-        img = img.convert('RGB')
+        img = Image.open(image_file).convert('RGB')
         original_size = img.size
-        print(f"Successfully opened image: {original_size}")
-        
-        # Resize to model input size
         img = img.resize(IMG_SIZE)
-        
-        # Convert to numpy array [0, 255] float32
-        img_array = np.array(img).astype("float32")
-        
-        # Add batch dimension (1, 224, 224, 3)
-        img_array = np.expand_dims(img_array, axis=0)
+        img_array = np.array(img).astype("float32")  # [0, 255] float32
+        img_array = np.expand_dims(img_array, axis=0)  # (1, 224, 224, 3)
 
         return img_array, original_size
     except Exception as e:
-        print(f"Image preprocessing error: {e}")
-        print(f"Image file type: {type(image_file)}")
-        print(f"Image file name: {getattr(image_file, 'name', 'unknown')}")
-        if hasattr(image_file, 'size'):
-            print(f"Image file size: {image_file.size} bytes")
-        if file_content:
-            print(f"Content length: {len(file_content)} bytes")
-            print(f"Content preview: {file_content[:100]}")
-        raise Exception(f"Failed to preprocess image: {str(e)}")
+        raise e
 
 
 
@@ -264,7 +168,6 @@ def preprocess_image(image_file):
 
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
-@permission_classes([AllowAny])  # Allow unauthenticated predictions
 def predict_image(request):
     
     import time
@@ -283,29 +186,6 @@ def predict_image(request):
 
     try:
         image_file = request.FILES['image']
-        
-        # === DEBUG: Log exactly what we received ===
-        print("=" * 50)
-        print("IMAGE FILE DEBUG INFO:")
-        print(f"  Name: {image_file.name}")
-        print(f"  Size: {image_file.size} bytes")
-        print(f"  Content-Type: {image_file.content_type}")
-        print(f"  Type: {type(image_file)}")
-        
-        # Read first 50 bytes to check what we actually got
-        image_file.seek(0)
-        first_bytes = image_file.read(50)
-        print(f"  First 50 bytes (raw): {first_bytes[:50]}")
-        print(f"  First 50 bytes (hex): {first_bytes[:50].hex()}")
-        image_file.seek(0)  # Reset for actual processing
-        
-        # Check if this looks like valid image data
-        is_jpeg = first_bytes[:2] == b'\xff\xd8'
-        is_png = first_bytes[:8] == b'\x89PNG\r\n\x1a\n'
-        print(f"  Looks like JPEG: {is_jpeg}")
-        print(f"  Looks like PNG: {is_png}")
-        print("=" * 50)
-        # === END DEBUG ===
         
         # get gps data from request
         latitude = request.data.get('latitude')
@@ -642,17 +522,6 @@ def predict_image(request):
                 # how long did it take
                 processing_time = time.time() - start_time
                 
-                # Safely get the user for saving
-                image_user = None
-                if hasattr(request, 'user'):
-                    if hasattr(request.user, 'is_authenticated') and request.user.is_authenticated:
-                        try:
-                            # Ensure user actually exists in database
-                            if request.user.id is not None:
-                                image_user = request.user
-                        except Exception as e:
-                            print(f"Error accessing user for image save: {e}")
-                
                 mango_image = MangoImage.objects.create(
                     image=image_file,
                     original_filename=image_file.name,
@@ -662,7 +531,7 @@ def predict_image(request):
                     model_used=model_used,  # Store which model was actually used
                     model_filename=os.path.basename(model_path),  # Store the actual model filename
                     confidence_score=prediction_summary['primary_prediction']['confidence'] / 100,
-                    user=image_user,  # Use safely retrieved user
+                    user=request.user if request.user.is_authenticated else None,
                     image_size=f"{original_size[0]}x{original_size[1]}",
                     processing_time=processing_time,
                     notes=f"Predicted via mobile app with {prediction_summary['primary_prediction']['confidence']:.2f}% confidence",
@@ -678,18 +547,7 @@ def predict_image(request):
                     symptoms_data=symptoms_data if symptoms_data else None,
                     **location_data  # Add all location data
                 )
-                
-                # Log prediction activity with proper error handling
-                try:
-                    current_user = None
-                    if hasattr(request, 'user'):
-                        if hasattr(request.user, 'is_authenticated') and request.user.is_authenticated:
-                            current_user = request.user
-                    log_prediction_activity(current_user, mango_image.id, prediction_summary)
-                except Exception as log_error:
-                    print(f"Failed to log prediction activity: {log_error}")
-                    # Continue anyway - logging shouldn't break predictions
-                
+                log_prediction_activity(request.user, mango_image.id, prediction_summary)
                 saved_image_id = mango_image.id
                 
                 # make notif for admin

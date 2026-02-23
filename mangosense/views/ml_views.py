@@ -284,6 +284,29 @@ def predict_image(request):
     try:
         image_file = request.FILES['image']
         
+        # === DEBUG: Log exactly what we received ===
+        print("=" * 50)
+        print("IMAGE FILE DEBUG INFO:")
+        print(f"  Name: {image_file.name}")
+        print(f"  Size: {image_file.size} bytes")
+        print(f"  Content-Type: {image_file.content_type}")
+        print(f"  Type: {type(image_file)}")
+        
+        # Read first 50 bytes to check what we actually got
+        image_file.seek(0)
+        first_bytes = image_file.read(50)
+        print(f"  First 50 bytes (raw): {first_bytes[:50]}")
+        print(f"  First 50 bytes (hex): {first_bytes[:50].hex()}")
+        image_file.seek(0)  # Reset for actual processing
+        
+        # Check if this looks like valid image data
+        is_jpeg = first_bytes[:2] == b'\xff\xd8'
+        is_png = first_bytes[:8] == b'\x89PNG\r\n\x1a\n'
+        print(f"  Looks like JPEG: {is_jpeg}")
+        print(f"  Looks like PNG: {is_png}")
+        print("=" * 50)
+        # === END DEBUG ===
+        
         # get gps data from request
         latitude = request.data.get('latitude')
         longitude = request.data.get('longitude')

@@ -161,3 +161,17 @@ class Notification(models.Model):
     
     def __str__(self):
         return f"{self.title} - {self.user.username}"
+
+class ModelConfig(models.Model):
+    DETECTION_TYPES = [
+        ('leaf', 'Leaf Model'),
+        ('fruit', 'Fruit Model'),
+    ]
+    detection_type = models.CharField(max_length=10, choices=DETECTION_TYPES, unique=True)
+    model_filename = models.CharField(max_length=255)
+    updated_at     = models.DateTimeField(auto_now=True)
+    updated_by     = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.detection_type}: {self.model_filename}"

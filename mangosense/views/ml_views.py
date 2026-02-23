@@ -19,8 +19,8 @@ from .utils import (
 
 import tensorflow as tf
 
-# image size for model
-IMG_SIZE = (240, 240)
+# image size for model — MUST match what the model was trained on
+IMG_SIZE = (224, 224)
 
 # diseases the leaf model knows
 LEAF_CLASS_NAMES = [
@@ -76,20 +76,44 @@ def get_treatment_for_disease(disease_name):
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
 #where the models are
-LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaves-mobilenetv2.keras')
-FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'fruit-mobilenetv2.keras')
-
+#LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaves-mobilenetv2.keras')
+#FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'fruit-mobilenetv2.keras')
+# fallback filenames if DB has no config yet
+_DEFAULT_LEAF_MODEL  = 'leaves-mobilenetv2.keras'
+_DEFAULT_FRUIT_MODEL = 'fruit-mobilenetv2.keras'
+def get_active_model_path(detection_type: str) -> str:
+    """
+    Read the currently active model filename from DB and build the full path.
+    Falls back to the default filename if no DB record exists.
+    """
+    try:
+        from ..models import ModelConfig  # late import to avoid circular
+        config = ModelConfig.objects.get(detection_type=detection_type)
+        filename = config.model_filename
+    except Exception:
+        filename = _DEFAULT_LEAF_MODEL if detection_type == 'leaf' else _DEFAULT_FRUIT_MODEL
+    return os.path.join(settings.BASE_DIR, 'models', filename)
 
 def preprocess_image(image_file):
+    """
+    Preprocessing for inference.
+    
+    The model now has architecture-specific preprocessing baked into
+    its graph (as a Lambda layer during training), so we only need to:
+      1. Resize to the expected input size
+      2. Keep pixel values as float32 in [0, 255]
+      3. Add batch dimension
+    
+    Do NOT normalize to [0,1] or use preprocess_input here —
+    the model handles it internally.
+    """
     try:
         img = Image.open(image_file).convert('RGB')
         original_size = img.size
         img = img.resize(IMG_SIZE)
-        img_array = np.array(img)
-        
-        img_array = tf.keras.applications.mobilenet_v2.preprocess_input(img_array)
-        img_array = np.expand_dims(img_array, axis=0)
-        
+        img_array = np.array(img).astype("float32")  # [0, 255] float32
+        img_array = np.expand_dims(img_array, axis=0)  # (1, 224, 224, 3)
+
         return img_array, original_size
     except Exception as e:
         raise e
@@ -198,11 +222,11 @@ def predict_image(request):
         
         # pick which model to use
         if detection_type == 'fruit':
-            model_path = FRUIT_MODEL_PATH
+            model_path = get_active_model_path('fruit')
             model_used = 'fruit'
             model_class_names = FRUIT_CLASS_NAMES
         else:
-            model_path = LEAF_MODEL_PATH
+            model_path = get_active_model_path('leaf')
             model_used = 'leaf'
             model_class_names = LEAF_CLASS_NAMES
 
@@ -485,24 +509,24 @@ def test_model_status(request):
         # see if theres an active model in db
         active_model = MLModel.objects.filter(is_active=True).first()
         
+        leaf_model_path = get_active_model_path('leaf')
+        fruit_model_path = get_active_model_path('fruit')
+        
         model_status = {
             'model_loaded': active_model is not None,
-            'model_path': str(settings.MODEL_PATH) if hasattr(settings, 'MODEL_PATH') else 'Not set',
-            'leaf_model_path': LEAF_MODEL_PATH,
-            'fruit_model_path': FRUIT_MODEL_PATH,
-            'leaf_model_exists': os.path.exists(LEAF_MODEL_PATH),
-            'fruit_model_exists': os.path.exists(FRUIT_MODEL_PATH),
+            'leaf_model_path': leaf_model_path,
+            'fruit_model_path': fruit_model_path,
+            'leaf_model_exists': os.path.exists(leaf_model_path),
+            'fruit_model_exists': os.path.exists(fruit_model_path),
             'leaf_class_names': LEAF_CLASS_NAMES,
             'fruit_class_names': FRUIT_CLASS_NAMES,
-            'class_names': class_names,  # For backward compatibility
             'leaf_classes_count': len(LEAF_CLASS_NAMES),
             'fruit_classes_count': len(FRUIT_CLASS_NAMES),
             'treatment_suggestions_count': len(treatment_suggestions),
             'active_model': {
                 'name': active_model.name if active_model else None,
                 'version': active_model.version if active_model else None,
-                'accuracy': active_model.accuracy if active_model else None,
-                'training_date': active_model.training_date if active_model else None
+                'file_path': active_model.file_path if active_model else None,
             } if active_model else None,
             'img_size': IMG_SIZE
         }
@@ -521,7 +545,6 @@ def test_model_status(request):
                     'model_status': model_status,
                     'available_leaf_diseases': LEAF_CLASS_NAMES,
                     'available_fruit_diseases': FRUIT_CLASS_NAMES,
-                    'available_diseases': class_names,  # For backward compatibility
                     'database_stats': database_stats
                 },
                 message='Model status retrieved successfully'

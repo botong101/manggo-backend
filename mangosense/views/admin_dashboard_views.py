@@ -15,30 +15,20 @@ from ..serializers import (
     MangoImageSerializer, MangoImageUpdateSerializer, 
     BulkUpdateSerializer, ImageUploadSerializer, UserDetailSerializer
 )
-from .ml_views import LEAF_MODEL_PATH, FRUIT_MODEL_PATH
+from .ml_views import get_active_model_path
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
 
 
 def get_actual_model_path(image):
-    """
-    figure out which model was used
-    """
     model_filename = getattr(image, 'model_filename', None)
     if model_filename:
-        model_path = f"models/{model_filename}"
-        return model_path
-    else:
-        #fallback to old way
-        disease_type = getattr(image, 'disease_type', 'leaf')
-        import os
-        if disease_type == 'fruit':
-            model_path = f"models/{os.path.basename(FRUIT_MODEL_PATH)}"
-            return model_path
-        else: 
-            model_path = f"models/{os.path.basename(LEAF_MODEL_PATH)}"
-            return model_path
+        return f"models/{model_filename}"
+    disease_type = getattr(image, 'disease_type', 'leaf')
+    import os
+    active_path = get_active_model_path(disease_type if disease_type in ('leaf', 'fruit') else 'leaf')
+    return f"models/{os.path.basename(active_path)}"
 
 def get_top_predictions_for_image(image):
     #get top 3 from prediction log

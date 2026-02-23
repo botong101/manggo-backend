@@ -45,6 +45,16 @@ from .views.notification_views import (
     notification_detail,
     delete_selected_notifications,
 )
+from .views.model_settings_views import (
+    #model settings admin component
+    get_model_settings, 
+    update_model_settings
+)
+from .views.disease_locations_views import (
+    disease_locations_similar,
+    disease_locations_all,
+)
+
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -97,4 +107,12 @@ urlpatterns = [
     path('users/<int:user_id>/', user_detail, name='user_detail'),
     path('users/<int:user_id>/images/', user_images, name='user_images'),
     path('users/statistics/', user_statistics, name='user_statistics'),
+
+    # model settings
+path('model-settings/', get_model_settings, name='get_model_settings'),
+path('model-settings/update/', update_model_settings, name='update_model_settings'),
+
+    # disease locations for map
+    path('disease-locations/similar/', disease_locations_similar, name='disease_locations_similar'),
+    path('disease-locations/all/', disease_locations_all, name='disease_locations_all'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -54,36 +54,13 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS Settings
+# CORS Settings - Allow all origins for development
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8100",  # Default Ionic serve port
-    "http://127.0.0.1:8100",
-    "http://localhost:8101",  # Alternative Ionic port
-    "http://127.0.0.1:8101",
-    "http://localhost:3000",  # If using React/Vue
-    "http://127.0.0.1:3000",
-    "http://localhost:4200",  
-    "http://127.0.0.1:4200",
-    "http://localhost:8000",  
-    "http://127.0.0.1:8000",
-    "http://localhost",       
-    "https://localhost",     
-    "capacitor://localhost",  
-    "ionic://localhost",
-    # Production URLs
-    "https://manggo-admin.vercel.app",  # Main Vercel deployment
-    "https://manggo-admin-rwis.vercel.app",  # Vercel deployment
-    "https://manggo-admin-rwis-git-main-botong101s-projects.vercel.app",  # Vercel git URL
-    "https://manggo-admin-rwis-lpcbgh8xk-botong101s-projects.vercel.app",  # Vercel preview URL
-    "https://manggasense.up.railway.app",  # Railway backend
-]
 
 CORS_ALLOW_HEADERS = [
     'accept',

@@ -172,7 +172,6 @@ def preprocess_image(image_file):
 def predict_image(request):
     start_time = time.time()
     
-    # debug
     if 'image' not in request.FILES:
         return JsonResponse(
             create_api_response(
@@ -186,21 +185,16 @@ def predict_image(request):
     try:
         image_file = request.FILES['image']
         
-        # get gps data from request
+        # get request data
         latitude = request.data.get('latitude')
         longitude = request.data.get('longitude')
         location_accuracy_confirmed = request.data.get('location_accuracy_confirmed', 'false').lower() == 'true'
         location_source = request.data.get('location_source', '')
         location_address = request.data.get('location_address', '')
-        
-        # check if just preview (dont save to db)
         preview_only = request.data.get('preview_only', 'false').lower() == 'true'
-        
-        # get what user said about detection
         is_detection_correct = request.data.get('is_detection_correct', '').lower() == 'true'
         user_feedback = request.data.get('user_feedback', '')
         
-        # get symptoms they picked
         try:
             selected_symptoms = json.loads(request.data.get('selected_symptoms', '[]'))
         except (json.JSONDecodeError, TypeError):
@@ -227,8 +221,8 @@ def predict_image(request):
             environmental_factors = json.loads(request.data.get('environmental_factors', '[]'))
         except (json.JSONDecodeError, TypeError):
             environmental_factors = []
-        
-        # make sure image is ok
+
+        # validate image
         validation_errors = validate_image_file(image_file)
         if validation_errors:
             return JsonResponse(
@@ -240,7 +234,7 @@ def predict_image(request):
                 status=400
             )
 
-        # prep the image — same 224x224 for gate and disease models
+        # preprocess image
         try:
             img_array, original_size = preprocess_image(image_file)
         except Exception as preprocessing_error:
@@ -253,15 +247,13 @@ def predict_image(request):
                 status=400
             )
 
-        # fruit or leaf?
+        # detection type
         detection_type = request.data.get('detection_type', 'leaf')
 
         # ================================================================
-        #  STAGE 1 — GATE MODEL (is this a mango leaf/fruit?)
+        #  STAGE 1 — GATE MODEL
         # ================================================================
         gate_model_path = get_active_model_path(detection_type, is_gate=True)
-
-        # defaults — if gate model missing or breaks, let image through
         gate_passed = True
         gate_confidence = None
         gate_prediction_label = None
@@ -272,7 +264,12 @@ def predict_image(request):
             try:
                 gate_model = tf.keras.models.load_model(gate_model_path)
                 gate_pred = gate_model.predict(img_array, verbose=0)
-                gate_pred = np.array(gate_pred).flatten()
+                
+                # FIX: Ensure gate_pred is properly flattened
+                gate_pred = np.array(gate_pred)
+                if len(gate_pred.shape) > 1:
+                    gate_pred = gate_pred[0]  # Get first batch item
+                gate_pred = gate_pred.flatten()  # Flatten to 1D array
 
                 if detection_type == 'fruit':
                     valid_idx = GATE_VALID_INDEX_FRUIT
@@ -283,20 +280,28 @@ def predict_image(request):
                     gate_cls = GATE_LEAF_CLASS_NAMES
                     threshold = GATE_CONFIDENCE_THRESHOLD_LEAF
 
-                # Get the predicted class and its confidence
+                # FIX: Ensure we get integer index, not array
                 gate_predicted_idx = int(np.argmax(gate_pred))
+                
+                # FIX: Check array bounds before accessing
+                if gate_predicted_idx >= len(gate_cls):
+                    print(f"Warning: predicted index {gate_predicted_idx} out of bounds for {len(gate_cls)} classes")
+                    gate_predicted_idx = 0
+                    
                 gate_prediction_label = gate_cls[gate_predicted_idx]
                 gate_confidence = float(gate_pred[gate_predicted_idx]) * 100.0
                 
-                # Get mango class confidence specifically
-                mango_confidence = float(gate_pred[valid_idx]) * 100.0
+                # FIX: Check valid_idx is within bounds
+                if valid_idx >= len(gate_pred):
+                    print(f"Warning: valid index {valid_idx} out of bounds for prediction array of length {len(gate_pred)}")
+                    mango_confidence = 0.0
+                else:
+                    mango_confidence = float(gate_pred[valid_idx]) * 100.0
 
-                # NEW LOGIC: Check BOTH predicted class AND mango confidence
-                # This matches your reference code structure
+                # Check both predicted class AND mango confidence
                 if gate_predicted_idx != valid_idx or mango_confidence < threshold:
                     gate_passed = False
                     
-                    # Log why it failed
                     if gate_predicted_idx != valid_idx:
                         print(f"❌ Gate failed: Predicted '{gate_prediction_label}' (not Mango)")
                     if mango_confidence < threshold:
@@ -304,17 +309,18 @@ def predict_image(request):
                 else:
                     print(f"✅ Gate passed: {gate_prediction_label} @ {gate_confidence:.2f}%, Mango @ {mango_confidence:.2f}%")
 
-                # free memory
                 del gate_model
                 gc.collect()
 
             except Exception as gate_err:
-                print(f"Gate model error: {gate_err} — allowing image through")
+                print(f"Gate model error: {gate_err}")
+                import traceback
+                traceback.print_exc()
                 gate_passed = True
         else:
-            print(f"Gate model not found at {gate_model_path} — allowing image through")
+            print(f"Gate model not found at {gate_model_path}")
 
-        # ---- gate rejected → return early ----
+        # Return if gate failed
         if not gate_passed:
             return JsonResponse(
                 create_api_response(
@@ -336,10 +342,9 @@ def predict_image(request):
             )
 
         # ================================================================
-        #  STAGE 2 — DISEASE CLASSIFICATION (existing logic)
+        #  STAGE 2 — DISEASE CLASSIFICATION
         # ================================================================
         
-        # pick which model to use
         if detection_type == 'fruit':
             model_path = get_active_model_path('fruit')
             model_class_names = FRUIT_CLASS_NAMES
@@ -349,7 +354,6 @@ def predict_image(request):
             model_class_names = LEAF_CLASS_NAMES
             model_used = 'leaf'
 
-        # check model file exists
         if not os.path.exists(model_path):
             return JsonResponse(
                 create_api_response(
@@ -360,7 +364,6 @@ def predict_image(request):
                 status=500
             )
 
-        # load the ai model
         try:
             disease_model = tf.keras.models.load_model(model_path)
         except Exception as model_error:
@@ -373,12 +376,19 @@ def predict_image(request):
                 status=500
             )
 
-        # run it thru the model
         try:
             prediction = disease_model.predict(img_array, verbose=0)
+            
+            # FIX: Ensure prediction is properly shaped
+            prediction = np.array(prediction)
+            if len(prediction.shape) > 1:
+                prediction = prediction[0]  # Get first batch
+            
             del disease_model
             gc.collect()
         except Exception as prediction_error:
+            import traceback
+            traceback.print_exc()
             return JsonResponse(
                 create_api_response(
                     success=False,
@@ -388,26 +398,36 @@ def predict_image(request):
                 status=500
             )
 
-        # organize the results
-        prediction_summary = get_prediction_summary(prediction, model_class_names)
+        # Get prediction summary
+        try:
+            prediction_summary = get_prediction_summary(prediction, model_class_names)
+        except Exception as summary_error:
+            import traceback
+            traceback.print_exc()
+            return JsonResponse(
+                create_api_response(
+                    success=False,
+                    message='Failed to process prediction results',
+                    errors=[str(summary_error)]
+                ),
+                status=500
+            )
 
-        # min confidence to show disease
+        # Set confidence threshold
         CONFIDENCE_THRESHOLD = 20.0
 
-        # if too low just say unknown
         if prediction_summary['primary_prediction']['confidence'] < CONFIDENCE_THRESHOLD:
             prediction_summary['primary_prediction']['disease'] = 'Unknown'
             prediction_summary['confidence_level'] = 'Very Low'
 
-        # add treatment info
+        # Add treatment info
         for pred in prediction_summary['top_3']:
             pred['treatment'] = get_treatment_for_disease(pred['disease'])
 
-        # frontend will handle symptoms itself
         primary_disease = prediction_summary['primary_prediction']['disease']
         alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]
 
-        # save to db unless just preview
+        # Save to database
         saved_image_id = None
         if not preview_only:
             try:
@@ -434,16 +454,21 @@ def predict_image(request):
                 )
                 saved_image_id = mango_image.id
                 
-                log_prediction_activity(
-                    user=request.user if request.user.is_authenticated else None,
-                    image=mango_image,
-                    prediction_result=prediction_summary['primary_prediction']['disease'],
-                    confidence=prediction_summary['primary_prediction']['confidence']
-                )
+                try:
+                    log_prediction_activity(
+                        user=request.user if (hasattr(request, 'user') and request.user.is_authenticated) else None,
+                        image=mango_image,
+                        prediction_result=prediction_summary['primary_prediction']['disease'],
+                        confidence=prediction_summary['primary_prediction']['confidence']
+                    )
+                except Exception as log_error:
+                    print(f"Prediction activity logging error: {log_error}")
+                    
             except Exception as db_error:
                 print(f"Database save error: {db_error}")
+                import traceback
+                traceback.print_exc()
 
-        # clean up memory
         gc.collect()
 
         response_data = {
@@ -482,25 +507,17 @@ def predict_image(request):
                 'message': f'Image validated as mango {detection_type}'
             },
             'model_used': model_used,
-            'model_path': model_path,
-            'debug_info': {
-                'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
-                'model_loaded': True,
-                'image_size': original_size,
-                'processed_size': IMG_SIZE,
-                'gate_threshold': threshold if 'threshold' in locals() else None
-            }
+            'model_path': model_path
         }
         
-        # only add image id if we actually saved it
         if not preview_only and saved_image_id:
             response_data['image_id'] = saved_image_id
             
         try:
             execution_time = time.time() - start_time
             response_data['execution_time'] = f"{execution_time:.2f}s"
-        except Exception as e:
-            print(f"Error calculating execution time: {e}")
+        except:
+            pass
 
         return JsonResponse(
             create_api_response(
@@ -511,6 +528,8 @@ def predict_image(request):
         )
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse(
             create_api_response(
                 success=False,

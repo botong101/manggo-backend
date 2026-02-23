@@ -49,9 +49,9 @@ GATE_VALID_INDEX_LEAF = 4  # "Mango" is at index 4 in the leaf gate list
 GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3 in the fruit gate list
 
 # Minimum gate confidence thresholds
-GATE_CONFIDENCE_THRESHOLD_LEAF = 40.0  # More lenient for diseased leaves
-GATE_CONFIDENCE_THRESHOLD_FRUIT = 50.0
-GATE_CONFIDENCE_THRESHOLD = 50.0  # Default threshold
+GATE_CONFIDENCE_THRESHOLD_LEAF = 60.0  # More lenient for diseased leaves
+GATE_CONFIDENCE_THRESHOLD_FRUIT = 60.0
+GATE_CONFIDENCE_THRESHOLD = 60.0  # Default threshold
 
 # ==================== DISEASE MODEL CLASS NAMES ====================
 # diseases the leaf model knows

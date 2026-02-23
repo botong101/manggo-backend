@@ -1,4 +1,5 @@
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.http import JsonResponse
 from django.conf import settings
@@ -167,6 +168,7 @@ def preprocess_image(image_file):
 
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
+@permission_classes([AllowAny])  # Add this if endpoint should work without auth
 def predict_image(request):
     start_time = time.time()
     

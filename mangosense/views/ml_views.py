@@ -152,15 +152,29 @@ def preprocess_image(image_file):
     All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
+        # Handle Django's InMemoryUploadedFile - seek to beginning
+        if hasattr(image_file, 'seek'):
+            image_file.seek(0)
+        
+        # Open with PIL
         img = Image.open(image_file).convert('RGB')
         original_size = img.size
+        
+        # Resize to model input size
         img = img.resize(IMG_SIZE)
-        img_array = np.array(img).astype("float32")  # [0, 255] float32
-        img_array = np.expand_dims(img_array, axis=0)  # (1, 224, 224, 3)
+        
+        # Convert to numpy array [0, 255] float32
+        img_array = np.array(img).astype("float32")
+        
+        # Add batch dimension (1, 224, 224, 3)
+        img_array = np.expand_dims(img_array, axis=0)
 
         return img_array, original_size
     except Exception as e:
-        raise e
+        print(f"Image preprocessing error: {e}")
+        print(f"Image file type: {type(image_file)}")
+        print(f"Image file name: {getattr(image_file, 'name', 'unknown')}")
+        raise Exception(f"Failed to preprocess image: {str(e)}")
 
 
 

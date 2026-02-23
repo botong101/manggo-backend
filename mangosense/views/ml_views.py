@@ -27,7 +27,6 @@ IMG_SIZE = (224, 224)
 # these must match the class_names from your gate model training
 # adjust to match your actual training folder names!
 GATE_LEAF_CLASS_NAMES = [
-    'Aegle marmelos',
     'Black plum',
     'Guava',
     'Jackfruit',
@@ -40,12 +39,12 @@ GATE_FRUIT_CLASS_NAMES = [
     'Apple',
     'Banana',
     'Grape',
-    'Mango',
+    'Mango',    
     'Strawberry'
 ]
 
 # index that means "valid mango" — adjust based on your training class order
-GATE_VALID_INDEX_LEAF = 5  # "Mango" is at index 5
+GATE_VALID_INDEX_LEAF = 4  # "Mango" is at index 5
 GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3
 
 # minimum gate confidence to let the image through

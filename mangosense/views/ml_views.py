@@ -10,6 +10,8 @@ import os
 import gc
 import json
 import time
+import base64
+import re
 from io import BytesIO
 from ..models import MangoImage, MLModel, PredictionLog, Notification
 from .utils import (
@@ -137,6 +139,25 @@ def get_active_model_path(detection_type: str, is_gate: bool = False) -> str:
     return os.path.join(settings.BASE_DIR, 'models', filename)
 
 
+def decode_base64_image(data):
+    """
+    Decode base64 image data to bytes.
+    Handles data URLs (data:image/jpeg;base64,...) and raw base64 strings.
+    """
+    # Check if it's a data URL
+    if isinstance(data, str):
+        # Remove data URL prefix if present
+        if data.startswith('data:'):
+            # Extract base64 part after the comma
+            match = re.match(r'data:image/[^;]+;base64,(.+)', data)
+            if match:
+                data = match.group(1)
+        
+        # Decode base64
+        return base64.b64decode(data)
+    return data
+
+
 def preprocess_image(image_file):
     """
     Preprocessing for inference.
@@ -153,29 +174,68 @@ def preprocess_image(image_file):
     All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
-        # Read file content into memory using BytesIO
-        # This is more reliable than directly reading InMemoryUploadedFile
+        file_content = None
+        
+        # Handle different input types
         if hasattr(image_file, 'read'):
-            # Read the entire file content
-            image_file.seek(0)  # Ensure we're at the beginning
+            # It's a file-like object (InMemoryUploadedFile, etc.)
+            image_file.seek(0)
             file_content = image_file.read()
-            
-            # Verify file is not empty
-            if not file_content:
-                raise Exception("Uploaded file is empty")
-            
-            # Create BytesIO object from content
-            image_bytes = BytesIO(file_content)
-            
-            # Open with PIL
-            img = Image.open(image_bytes)
+            print(f"Read {len(file_content)} bytes from file-like object")
+        elif isinstance(image_file, bytes):
+            file_content = image_file
+            print(f"Received {len(file_content)} raw bytes")
+        elif isinstance(image_file, str):
+            # Could be base64 encoded or a file path
+            if os.path.exists(image_file):
+                with open(image_file, 'rb') as f:
+                    file_content = f.read()
+                print(f"Read {len(file_content)} bytes from file path")
+            else:
+                # Assume base64
+                file_content = decode_base64_image(image_file)
+                print(f"Decoded {len(file_content)} bytes from base64")
         else:
-            # Fallback for file paths
-            img = Image.open(image_file)
+            raise Exception(f"Unsupported image input type: {type(image_file)}")
+        
+        # Verify file is not empty
+        if not file_content:
+            raise Exception("Uploaded file is empty")
+        
+        # Check for base64-encoded content in binary data
+        # Sometimes the frontend sends base64 as a string inside the file
+        if file_content[:5] == b'data:' or file_content[:20].startswith(b'data:image'):
+            print("Detected base64 data URL in file content")
+            file_content = decode_base64_image(file_content.decode('utf-8'))
+        
+        # Log first few bytes for debugging
+        print(f"First 20 bytes: {file_content[:20]}")
+        
+        # Check for common image magic bytes
+        is_jpeg = file_content[:2] == b'\xff\xd8'
+        is_png = file_content[:8] == b'\x89PNG\r\n\x1a\n'
+        is_gif = file_content[:6] in (b'GIF87a', b'GIF89a')
+        is_webp = file_content[:4] == b'RIFF' and file_content[8:12] == b'WEBP'
+        print(f"Image format detection - JPEG: {is_jpeg}, PNG: {is_png}, GIF: {is_gif}, WebP: {is_webp}")
+        
+        if not (is_jpeg or is_png or is_gif or is_webp):
+            # Try to decode as base64 if it looks like text
+            try:
+                decoded = base64.b64decode(file_content)
+                if decoded[:2] == b'\xff\xd8' or decoded[:8] == b'\x89PNG\r\n\x1a\n':
+                    print("Successfully decoded raw base64 to image bytes")
+                    file_content = decoded
+            except Exception:
+                pass  # Not base64, continue with original content
+        
+        # Create BytesIO and open with PIL
+        image_bytes = BytesIO(file_content)
+        img = Image.open(image_bytes)
         
         # Convert to RGB (handles PNG, RGBA, etc.)
         img = img.convert('RGB')
         original_size = img.size
+        print(f"Successfully opened image: {original_size}")
         
         # Resize to model input size
         img = img.resize(IMG_SIZE)
@@ -193,6 +253,9 @@ def preprocess_image(image_file):
         print(f"Image file name: {getattr(image_file, 'name', 'unknown')}")
         if hasattr(image_file, 'size'):
             print(f"Image file size: {image_file.size} bytes")
+        if file_content:
+            print(f"Content length: {len(file_content)} bytes")
+            print(f"Content preview: {file_content[:100]}")
         raise Exception(f"Failed to preprocess image: {str(e)}")
 
 

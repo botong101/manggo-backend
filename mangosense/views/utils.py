@@ -199,20 +199,34 @@ def paginate_queryset(queryset, page_number, page_size=20):
         }
     }
 
-def create_api_response(success=True, message="", data=None, errors=None, error_code=None, status_code=200):
-    """make consistent api responses"""
-    response_data = {
+def create_api_response(success=True, message='', data=None, errors=None, error_code=None):
+    """
+    Create a standardized API response.
+    
+    Args:
+        success: Boolean indicating success/failure
+        message: Human-readable message
+        data: Response data (dict)
+        errors: List of error messages
+        error_code: Specific error code for frontend handling
+    
+    Returns:
+        dict: Standardized response
+    """
+    from django.utils import timezone
+    
+    response = {
         'success': success,
         'message': message,
         'data': data or {},
-        'timestamp': timezone.now().isoformat()  # timezone is now imported
+        'timestamp': timezone.now().isoformat()
     }
     
-    if errors:
-        response_data['errors'] = errors
-    
     if error_code:
-        response_data['error_code'] = error_code
+        response['error_code'] = error_code
     
-    return response_data
+    if errors:
+        response['errors'] = errors if isinstance(errors, list) else [errors]
+    
+    return response
 

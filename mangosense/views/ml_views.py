@@ -523,6 +523,17 @@ def predict_image(request):
                 # how long did it take
                 processing_time = time.time() - start_time
                 
+                # Safely get the user for saving
+                image_user = None
+                if hasattr(request, 'user'):
+                    if hasattr(request.user, 'is_authenticated') and request.user.is_authenticated:
+                        try:
+                            # Ensure user actually exists in database
+                            if request.user.id is not None:
+                                image_user = request.user
+                        except Exception as e:
+                            print(f"Error accessing user for image save: {e}")
+                
                 mango_image = MangoImage.objects.create(
                     image=image_file,
                     original_filename=image_file.name,
@@ -532,7 +543,7 @@ def predict_image(request):
                     model_used=model_used,  # Store which model was actually used
                     model_filename=os.path.basename(model_path),  # Store the actual model filename
                     confidence_score=prediction_summary['primary_prediction']['confidence'] / 100,
-                    user=request.user if request.user.is_authenticated else None,
+                    user=image_user,  # Use safely retrieved user
                     image_size=f"{original_size[0]}x{original_size[1]}",
                     processing_time=processing_time,
                     notes=f"Predicted via mobile app with {prediction_summary['primary_prediction']['confidence']:.2f}% confidence",
@@ -548,7 +559,18 @@ def predict_image(request):
                     symptoms_data=symptoms_data if symptoms_data else None,
                     **location_data  # Add all location data
                 )
-                log_prediction_activity(request.user, mango_image.id, prediction_summary)
+                
+                # Log prediction activity with proper error handling
+                try:
+                    current_user = None
+                    if hasattr(request, 'user'):
+                        if hasattr(request.user, 'is_authenticated') and request.user.is_authenticated:
+                            current_user = request.user
+                    log_prediction_activity(current_user, mango_image.id, prediction_summary)
+                except Exception as log_error:
+                    print(f"Failed to log prediction activity: {log_error}")
+                    # Continue anyway - logging shouldn't break predictions
+                
                 saved_image_id = mango_image.id
                 
                 # make notif for admin

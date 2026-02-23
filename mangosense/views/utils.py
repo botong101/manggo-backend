@@ -145,19 +145,29 @@ def get_prediction_summary(prediction, class_names):
         raise
 
 def log_prediction_activity(user, image_id, prediction_result):
-    """log prediction for analytics"""
+    """log prediction for analytics - handles anonymous users"""
     from django.utils import timezone
     import logging
     
     logger = logging.getLogger('mangosense.predictions')
     
+    # Safely get user ID
+    user_id = None
+    if user is not None:
+        try:
+            if hasattr(user, 'is_authenticated') and user.is_authenticated:
+                if hasattr(user, 'id'):
+                    user_id = user.id
+        except Exception as e:
+            print(f"Error accessing user ID: {e}")
+    
     log_data = {
-        'user_id': user.id if user and user.is_authenticated else None,
+        'user_id': user_id,
         'image_id': image_id,
         'prediction': prediction_result.get('primary_prediction', {}).get('disease'),
         'confidence': prediction_result.get('primary_prediction', {}).get('confidence'),
         'timestamp': timezone.now().isoformat(),
-        'ip_address': getattr(user, 'ip_address', None)
+        'is_anonymous': user_id is None
     }
     
     logger.info(f"Prediction logged: {log_data}")

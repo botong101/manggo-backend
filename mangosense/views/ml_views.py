@@ -6,10 +6,12 @@ from django.conf import settings
 from django.utils import timezone
 from PIL import Image
 import numpy as np
+import tensorflow as tf
 import os
 import gc
-import json
 import time
+import json
+
 from ..models import MangoImage, MLModel, PredictionLog, Notification
 from .utils import (
     get_client_ip, validate_image_file, get_disease_type,
@@ -17,8 +19,6 @@ from .utils import (
     log_prediction_activity, 
     create_api_response
 )
-
-import tensorflow as tf
 
 # image size for model — MUST match what the model was trained on
 # all 4 models (gate leaf, gate fruit, disease leaf, disease fruit) use 224x224
@@ -140,27 +140,31 @@ def preprocess_image(image_file):
     """
     Preprocessing for inference.
     
-    The model now has architecture-specific preprocessing baked into
-    its graph (as a Lambda layer during training), so we only need to:
-      1. Resize to the expected input size
-      2. Keep pixel values as float32 in [0, 255]
-      3. Add batch dimension
-    
-    Do NOT normalize to [0,1] or use preprocess_input here —
-    the model handles it internally.
-    
-    All 4 models use 224x224 MobileNetV2 pretrained.
+    Returns:
+        tuple: (img_array, original_size)
     """
     try:
         img = Image.open(image_file).convert('RGB')
         original_size = img.size
         img = img.resize(IMG_SIZE)
-        img_array = np.array(img).astype("float32")  # [0, 255] float32
-        img_array = np.expand_dims(img_array, axis=0)  # (1, 224, 224, 3)
-
+        
+        # Convert to numpy array as float32 in [0, 255]
+        img_array = np.array(img, dtype=np.float32)
+        
+        # Add batch dimension: (224, 224, 3) -> (1, 224, 224, 3)
+        img_array = np.expand_dims(img_array, axis=0)
+        
+        print(f"Preprocessed image shape: {img_array.shape}")
+        print(f"Preprocessed image dtype: {img_array.dtype}")
+        print(f"Preprocessed image range: [{img_array.min()}, {img_array.max()}]")
+        
         return img_array, original_size
+        
     except Exception as e:
-        raise e
+        print(f"Preprocessing error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 
@@ -379,36 +383,73 @@ def predict_image(request):
         try:
             prediction = disease_model.predict(img_array, verbose=0)
             
-            # FIX: Ensure prediction is properly shaped
+            # FIX: Debug the prediction shape
+            print(f"Raw prediction shape: {prediction.shape}")
+            print(f"Raw prediction type: {type(prediction)}")
+            
+            # FIX: Ensure prediction is 1D array of probabilities
             prediction = np.array(prediction)
             if len(prediction.shape) > 1:
-                prediction = prediction[0]  # Get first batch
+                if prediction.shape[0] == 1:
+                    prediction = prediction[0]  # Remove batch dimension
+                else:
+                    prediction = prediction.flatten()
+            
+            print(f"Processed prediction shape: {prediction.shape}")
+            print(f"Prediction values: {prediction}")
+            print(f"Number of classes: {len(model_class_names)}")
+            
+            # Validate prediction array length matches class names
+            if len(prediction) != len(model_class_names):
+                raise ValueError(
+                    f"Prediction array length ({len(prediction)}) doesn't match "
+                    f"number of classes ({len(model_class_names)})"
+                )
             
             del disease_model
             gc.collect()
+            
         except Exception as prediction_error:
             import traceback
-            traceback.print_exc()
+            error_trace = traceback.format_exc()
+            print(f"Prediction error: {prediction_error}")
+            print(error_trace)
             return JsonResponse(
                 create_api_response(
                     success=False,
-                    message='Prediction failed',
-                    errors=[str(prediction_error)]
+                    message='Disease prediction failed',
+                    errors=[
+                        str(prediction_error),
+                        f"Prediction shape issue - check server logs"
+                    ]
                 ),
                 status=500
             )
 
-        # Get prediction summary
+        # Get prediction summary with error handling
         try:
-            prediction_summary = get_prediction_summary(prediction, model_class_names)
+            # Make sure prediction is properly formatted
+            prediction_array = np.array(prediction, dtype=np.float32)
+            if prediction_array.ndim != 1:
+                prediction_array = prediction_array.flatten()
+            
+            print(f"Final prediction array shape before summary: {prediction_array.shape}")
+            
+            prediction_summary = get_prediction_summary(prediction_array, model_class_names)
+            
         except Exception as summary_error:
             import traceback
-            traceback.print_exc()
+            error_trace = traceback.format_exc()
+            print(f"Summary error: {summary_error}")
+            print(error_trace)
             return JsonResponse(
                 create_api_response(
                     success=False,
                     message='Failed to process prediction results',
-                    errors=[str(summary_error)]
+                    errors=[
+                        str(summary_error),
+                        "Check prediction array format"
+                    ]
                 ),
                 status=500
             )

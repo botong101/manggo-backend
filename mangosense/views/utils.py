@@ -4,6 +4,7 @@ import json
 import os
 import uuid
 from PIL import Image
+import numpy as np
 
 def get_client_ip(request):
     """get users ip address"""
@@ -90,32 +91,58 @@ def sanitize_filename(filename):
     filename = re.sub(r'[-\s]+', '_', filename)
     return filename
 
-def get_prediction_summary(predictions, class_names):
-    """organize ai prediction results"""
-    import numpy as np
+def get_prediction_summary(prediction, class_names):
+    """
+    Process prediction results and return a structured summary.
     
-    # get top 3
-    top_3_indices = np.argsort(predictions)[-3:][::-1]
+    Args:
+        prediction: numpy array of prediction probabilities
+        class_names: list of class names
     
-    summary = {
-        'primary_prediction': {
-            'disease': class_names[top_3_indices[0]],
-            'confidence': float(predictions[top_3_indices[0]]) * 100
-        },
-        'top_3': [],
-        'confidence_level': calculate_confidence_level(predictions[top_3_indices[0]])
-    }
-    
-    for i, idx in enumerate(top_3_indices):
-        confidence = float(predictions[idx]) * 100
-        summary['top_3'].append({
-            'rank': i + 1,
-            'disease': class_names[idx],
-            'confidence': round(confidence, 2),
-            'confidence_formatted': f"{confidence:.2f}%"
-        })
-    
-    return summary
+    Returns:
+        dict with prediction summary
+    """
+    try:
+        # FIX: Ensure prediction is a 1D array
+        prediction = np.array(prediction)
+        if len(prediction.shape) > 1:
+            prediction = prediction.flatten()
+        
+        # Get top prediction with proper integer conversion
+        top_index = int(np.argmax(prediction))
+        top_confidence = float(prediction[top_index]) * 100.0
+        top_disease = class_names[top_index]
+        
+        # Get top 3 predictions
+        # FIX: Use argsort properly and convert to Python list
+        top_3_indices = np.argsort(prediction)[-3:][::-1]
+        top_3_indices = [int(idx) for idx in top_3_indices]  # Convert to Python ints
+        
+        top_3_predictions = []
+        for idx in top_3_indices:
+            top_3_predictions.append({
+                'disease': class_names[idx],
+                'confidence': float(prediction[idx]) * 100.0,
+                'treatment': None  # Will be filled later
+            })
+        
+        # Determine confidence level
+        confidence_level = calculate_confidence_level(top_confidence)
+        
+        return {
+            'primary_prediction': {
+                'disease': top_disease,
+                'confidence': top_confidence
+            },
+            'top_3': top_3_predictions,
+            'confidence_level': confidence_level
+        }
+        
+    except Exception as e:
+        print(f"Error in get_prediction_summary: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def log_prediction_activity(user, image_id, prediction_result):
     """log prediction for analytics"""

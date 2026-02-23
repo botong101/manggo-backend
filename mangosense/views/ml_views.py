@@ -108,7 +108,7 @@ def get_treatment_for_disease(disease_name):
 # fallback filenames if DB has no config yet
 _DEFAULT_LEAF_MODEL       = 'leaf-edge-model.keras'
 _DEFAULT_FRUIT_MODEL      = 'fruit-mobilenetv2.keras'
-_DEFAULT_GATE_LEAF_MODEL  = 'gate-leaf-model.keras'
+_DEFAULT_GATE_LEAF_MODEL  = 'gate-leaf-model-2.keras'
 _DEFAULT_GATE_FRUIT_MODEL = 'mango-fruit-vs-others.keras'
 
 

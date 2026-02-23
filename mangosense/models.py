@@ -163,11 +163,14 @@ class Notification(models.Model):
         return f"{self.title} - {self.user.username}"
 
 class ModelConfig(models.Model):
+    """which model file to use for each detection type — swappable via admin"""
     DETECTION_TYPES = [
-        ('leaf', 'Leaf Model'),
-        ('fruit', 'Fruit Model'),
+        ('leaf', 'Leaf Disease Model'),
+        ('fruit', 'Fruit Disease Model'),
+        ('gate_leaf', 'Gate Leaf Model'),
+        ('gate_fruit', 'Gate Fruit Model'),
     ]
-    detection_type = models.CharField(max_length=10, choices=DETECTION_TYPES, unique=True)
+    detection_type = models.CharField(max_length=20, choices=DETECTION_TYPES, unique=True)
     model_filename = models.CharField(max_length=255)
     updated_at     = models.DateTimeField(auto_now=True)
     updated_by     = models.ForeignKey(

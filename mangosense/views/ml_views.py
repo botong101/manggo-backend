@@ -20,8 +20,38 @@ from .utils import (
 import tensorflow as tf
 
 # image size for model — MUST match what the model was trained on
+# all 4 models (gate leaf, gate fruit, disease leaf, disease fruit) use 224x224
 IMG_SIZE = (224, 224)
 
+# ==================== GATE MODEL CLASS NAMES ====================
+# these must match the class_names from your gate model training
+# adjust to match your actual training folder names!
+GATE_LEAF_CLASS_NAMES = [
+    'Aegle marmelos',
+    'Black plum',
+    'Guava',
+    'Jackfruit',
+    'Lychee',
+    'Mango',
+    'Plum',
+]
+
+GATE_FRUIT_CLASS_NAMES = [
+    'Apple',
+    'Banana',
+    'Grape',
+    'Mango',
+    'Strawberry'
+]
+
+# index that means "valid mango" — adjust based on your training class order
+GATE_VALID_INDEX_LEAF = 5  # "Mango" is at index 5
+GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3
+
+# minimum gate confidence to let the image through
+GATE_CONFIDENCE_THRESHOLD = 50.0
+
+# ==================== DISEASE MODEL CLASS NAMES ====================
 # diseases the leaf model knows
 LEAF_CLASS_NAMES = [
     'Anthracnose','Die Back', 'Healthy','Powdery Mildew','Sooty Mold',
@@ -75,24 +105,35 @@ def get_treatment_for_disease(disease_name):
     
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
-#where the models are
-#LEAF_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'leaves-mobilenetv2.keras')
-#FRUIT_MODEL_PATH = os.path.join(settings.BASE_DIR, 'models', 'fruit-mobilenetv2.keras')
 # fallback filenames if DB has no config yet
-_DEFAULT_LEAF_MODEL  = 'leaves-mobilenetv2.keras'
-_DEFAULT_FRUIT_MODEL = 'fruit-mobilenetv2.keras'
-def get_active_model_path(detection_type: str) -> str:
+_DEFAULT_LEAF_MODEL       = 'leaf-edge-model.keras'
+_DEFAULT_FRUIT_MODEL      = 'fruit-mobilenetv2.keras'
+_DEFAULT_GATE_LEAF_MODEL  = 'gate-leaf-model.keras'
+_DEFAULT_GATE_FRUIT_MODEL = 'mango-fruit-vs-others.keras'
+
+
+def get_active_model_path(detection_type: str, is_gate: bool = False) -> str:
     """
-    Read the currently active model filename from DB and build the full path.
-    Falls back to the default filename if no DB record exists.
+    Build path to the active model file.
+    detection_type: 'leaf' or 'fruit'
+    is_gate: True = gate validation model, False = disease classification model
     """
+    if is_gate:
+        config_key = f'gate_{detection_type}'
+        default = _DEFAULT_GATE_LEAF_MODEL if detection_type == 'leaf' else _DEFAULT_GATE_FRUIT_MODEL
+    else:
+        config_key = detection_type
+        default = _DEFAULT_LEAF_MODEL if detection_type == 'leaf' else _DEFAULT_FRUIT_MODEL
+
     try:
-        from ..models import ModelConfig  # late import to avoid circular
-        config = ModelConfig.objects.get(detection_type=detection_type)
+        from ..models import ModelConfig
+        config = ModelConfig.objects.get(detection_type=config_key)
         filename = config.model_filename
     except Exception:
-        filename = _DEFAULT_LEAF_MODEL if detection_type == 'leaf' else _DEFAULT_FRUIT_MODEL
+        filename = default
+
     return os.path.join(settings.BASE_DIR, 'models', filename)
+
 
 def preprocess_image(image_file):
     """
@@ -106,6 +147,8 @@ def preprocess_image(image_file):
     
     Do NOT normalize to [0,1] or use preprocess_input here —
     the model handles it internally.
+    
+    All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
         img = Image.open(image_file).convert('RGB')
@@ -197,7 +240,7 @@ def predict_image(request):
                 status=400
             )
 
-        # prep the image
+        # prep the image — same 224x224 for gate and disease models
         try:
             img_array, original_size = preprocess_image(image_file)
         except Exception as preprocessing_error:
@@ -219,6 +262,111 @@ def predict_image(request):
         location_accuracy_confirmed = request.data.get('location_accuracy_confirmed', 'false').lower() == 'true'
         location_source = request.data.get('location_source', '')
         location_address = request.data.get('location_address', '')
+
+        # ================================================================
+        #  STAGE 1 — GATE MODEL (is this a mango leaf/fruit?)
+        # ================================================================
+        gate_model_path = get_active_model_path(detection_type, is_gate=True)
+
+        # defaults — if gate model missing or breaks, let image through
+        gate_passed = True
+        gate_confidence = None
+        gate_prediction_label = None
+
+        if os.path.exists(gate_model_path):
+            try:
+                gate_model = tf.keras.models.load_model(gate_model_path)
+                gate_pred = gate_model.predict(img_array)
+                gate_pred = np.array(gate_pred).flatten()
+
+                if detection_type == 'fruit':
+                    valid_idx = GATE_VALID_INDEX_FRUIT
+                    gate_cls = GATE_FRUIT_CLASS_NAMES
+                else:
+                    valid_idx = GATE_VALID_INDEX_LEAF
+                    gate_cls = GATE_LEAF_CLASS_NAMES
+
+                gate_confidence = float(gate_pred[valid_idx]) * 100
+                gate_predicted_idx = int(np.argmax(gate_pred))
+                gate_prediction_label = gate_cls[gate_predicted_idx]
+
+                gate_passed = (
+                    gate_predicted_idx == valid_idx
+                    and gate_confidence >= GATE_CONFIDENCE_THRESHOLD
+                )
+
+                # free memory
+                del gate_model
+                gc.collect()
+
+            except Exception as gate_err:
+                print(f"Gate model error: {gate_err} — skipping validation")
+        else:
+            print(f"Gate model not found at {gate_model_path} — skipping validation")
+
+        # ---- gate rejected → return early ----
+        if not gate_passed:
+            part = detection_type.capitalize()  # "Leaf" or "Fruit"
+            return JsonResponse(
+                create_api_response(
+                    success=True,
+                    data={
+                        'primary_prediction': {
+                            'disease': f'Not a Mango {part}',
+                            'confidence': f"{gate_confidence:.2f}%",
+                            'confidence_score': gate_confidence or 0,
+                            'confidence_level': 'Low',
+                            'treatment': (
+                                f"The uploaded image does not appear to be a mango {detection_type}. "
+                                f"Please upload a clear image of a mango {detection_type} and try again."
+                            ),
+                            'detection_type': detection_type
+                        },
+                        'top_3_predictions': [],
+                        'prediction_summary': {
+                            'most_likely': f'Not a Mango {part}',
+                            'confidence_level': 'Low',
+                            'total_diseases_checked': 0
+                        },
+                        'alternative_symptoms': {
+                            'primary_disease': f'Not a Mango {part}',
+                            'primary_disease_symptoms': [],
+                            'alternative_diseases': []
+                        },
+                        'user_verification': {
+                            'selected_symptoms': [],
+                            'primary_symptoms': [],
+                            'alternative_symptoms': [],
+                            'detected_disease': f'Not a Mango {part}',
+                            'is_detection_correct': False,
+                            'user_feedback': ''
+                        },
+                        'gate_validation': {
+                            'passed': False,
+                            'gate_prediction': gate_prediction_label,
+                            'gate_confidence': gate_confidence,
+                            'message': f'Image classified as "{gate_prediction_label}" by gate model'
+                        },
+                        'saved_image_id': None,
+                        'model_used': detection_type,
+                        'debug_info': {
+                            'gate_model_used': True,
+                            'gate_model_path': gate_model_path,
+                            'processing_time': time.time() - start_time,
+                            'image_size': original_size,
+                            'processed_size': IMG_SIZE
+                        }
+                    },
+                    message=(
+                        f'The uploaded image does not appear to be a mango {detection_type}. '
+                        f'Please upload a clear image of a mango {detection_type}.'
+                    )
+                )
+            )
+
+        # ================================================================
+        #  STAGE 2 — DISEASE CLASSIFICATION (existing logic)
+        # ================================================================
         
         # pick which model to use
         if detection_type == 'fruit':
@@ -306,10 +454,17 @@ def predict_image(request):
                     'is_detection_correct': False,
                     'user_feedback': ''
                 },
+                'gate_validation': {
+                    'passed': True,
+                    'gate_prediction': gate_prediction_label,
+                    'gate_confidence': gate_confidence,
+                    'message': f'Image validated as mango {detection_type}'
+                },
                 'saved_image_id': None,
                 'model_used': model_used,
                 'model_path': model_path,
                 'debug_info': {
+                    'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                     'model_loaded': True,
                     'image_size': original_size,
                     'processed_size': IMG_SIZE
@@ -452,9 +607,17 @@ def predict_image(request):
                 'is_detection_correct': is_detection_correct,
                 'user_feedback': user_feedback
             },
+            # gate validation info for frontend
+            'gate_validation': {
+                'passed': True,
+                'gate_prediction': gate_prediction_label,
+                'gate_confidence': gate_confidence,
+                'message': f'Image validated as mango {detection_type}'
+            },
             'model_used': model_used,
             'model_path': model_path,
             'debug_info': {
+                'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                 'model_loaded': True,
                 'image_size': original_size,
                 'processed_size': IMG_SIZE
@@ -511,18 +674,27 @@ def test_model_status(request):
         
         leaf_model_path = get_active_model_path('leaf')
         fruit_model_path = get_active_model_path('fruit')
+        gate_leaf_model_path = get_active_model_path('leaf', is_gate=True)
+        gate_fruit_model_path = get_active_model_path('fruit', is_gate=True)
         
         model_status = {
             'model_loaded': active_model is not None,
             'leaf_model_path': leaf_model_path,
             'fruit_model_path': fruit_model_path,
+            'gate_leaf_model_path': gate_leaf_model_path,
+            'gate_fruit_model_path': gate_fruit_model_path,
             'leaf_model_exists': os.path.exists(leaf_model_path),
             'fruit_model_exists': os.path.exists(fruit_model_path),
+            'gate_leaf_model_exists': os.path.exists(gate_leaf_model_path),
+            'gate_fruit_model_exists': os.path.exists(gate_fruit_model_path),
             'leaf_class_names': LEAF_CLASS_NAMES,
             'fruit_class_names': FRUIT_CLASS_NAMES,
+            'gate_leaf_class_names': GATE_LEAF_CLASS_NAMES,
+            'gate_fruit_class_names': GATE_FRUIT_CLASS_NAMES,
             'leaf_classes_count': len(LEAF_CLASS_NAMES),
             'fruit_classes_count': len(FRUIT_CLASS_NAMES),
             'treatment_suggestions_count': len(treatment_suggestions),
+            'gate_confidence_threshold': GATE_CONFIDENCE_THRESHOLD,
             'active_model': {
                 'name': active_model.name if active_model else None,
                 'version': active_model.version if active_model else None,

@@ -108,32 +108,6 @@ def save_user_confirmation(request):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        
-        return JsonResponse(
-            create_api_response(
-                success=False,
-                message='Failed to save confirmation',
-                errors=[str(e)]
-            ),
-            status=500
-        )
-        
-        confirmation = UserConfirmation.objects.create(**confirmation_data)
-        
-        return JsonResponse(
-            create_api_response(
-                success=True,
-                data={
-                    'confirmation_id': confirmation.id,
-                    'image_id': image.id,
-                    'predicted_disease': confirmation.predicted_disease,
-                    'location_saved': confirmation.location_consent_given
-                },
-                message='User confirmation saved successfully'
-            )
-        )
-        
-    except Exception as e:
         return JsonResponse(
             create_api_response(
                 success=False,

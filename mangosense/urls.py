@@ -3,10 +3,10 @@ from .views import (
     # Authentication
     register_api, login_api, logout_api,
     admin_login_api, admin_refresh_token,
-    
+
     # ML Prediction
     predict_image, test_model_status,
-    
+
     # Admin Dashboard APIs
     disease_statistics,
     classified_images_list,
@@ -17,6 +17,7 @@ from .views import (
     upload_image,
     export_dataset,
 )
+from .views.admin_dashboard_views import disease_trends
 from .views.health_views import health_check
 from .views.admin_dashboard_views import (
     #user API for managemnet
@@ -77,6 +78,7 @@ urlpatterns = [
     
     #admin panel
     path('disease-statistics/', disease_statistics, name='disease_statistics'),
+    path('disease-trends/', disease_trends, name='disease_trends'),
     path('classified-images/', classified_images_list, name='classified_images_list'),
     path('classified-images/<int:pk>/', classified_images_detail, name='classified_images_detail'),
     path('classified-images/<int:pk>/prediction-details/', image_prediction_details, name='image_prediction_details'),

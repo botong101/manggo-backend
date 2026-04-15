@@ -660,6 +660,63 @@ def user_images(request, user_id):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+def disease_trends(request):
+    """daily disease trends for the dashboard charts"""
+    try:
+        days = int(request.GET.get('days', 30))
+        days = min(max(days, 7), 90)
+
+        from django.db.models.functions import TruncDate
+
+        start_date = timezone.now() - timedelta(days=days)
+
+        daily_qs = (
+            MangoImage.objects
+            .filter(uploaded_at__gte=start_date)
+            .annotate(date=TruncDate('uploaded_at'))
+            .values('date')
+            .annotate(
+                total=Count('id'),
+                healthy=Count('id', filter=Q(predicted_class__icontains='healthy')),
+                diseased=Count('id', filter=~Q(predicted_class__icontains='healthy'))
+            )
+            .order_by('date')
+        )
+
+        date_map = {entry['date']: entry for entry in daily_qs}
+
+        result = []
+        for i in range(days):
+            d = (timezone.now() - timedelta(days=days - 1 - i)).date()
+            if d in date_map:
+                entry = date_map[d]
+                result.append({
+                    'date': d.isoformat(),
+                    'total': entry['total'],
+                    'healthy': entry['healthy'],
+                    'diseased': entry['diseased'],
+                })
+            else:
+                result.append({'date': d.isoformat(), 'total': 0, 'healthy': 0, 'diseased': 0})
+
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'daily_trends': result,
+                'date_range': {
+                    'start': (timezone.now() - timedelta(days=days)).date().isoformat(),
+                    'end': timezone.now().date().isoformat(),
+                },
+                'period_days': days,
+            }
+        })
+
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': f'Internal server error: {str(e)}'}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
 def user_statistics(request):
     """user stats for admin dashboard"""
     try:

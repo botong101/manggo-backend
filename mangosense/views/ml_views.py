@@ -18,7 +18,14 @@ from .utils import (
     create_api_response
 )
 
-import tensorflow as tf
+
+def get_tensorflow_runtime():
+    """Load TensorFlow lazily so Django can start even if native TF runtime is unavailable."""
+    try:
+        import tensorflow as tf
+        return tf, None
+    except Exception as exc:
+        return None, str(exc)
 
 # image size for model — MUST match what the model was trained on
 # all 4 models (gate leaf, gate fruit, disease leaf, disease fruit) use 224x224
@@ -188,6 +195,17 @@ def predict_image(request):
         )
 
     try:
+        tf, tf_runtime_error = get_tensorflow_runtime()
+        if tf is None:
+            return JsonResponse(
+                create_api_response(
+                    success=False,
+                    message='TensorFlow runtime unavailable',
+                    errors=[tf_runtime_error]
+                ),
+                status=503
+            )
+
         image_file = request.FILES['image']
         
         # get gps data from request

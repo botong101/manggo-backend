@@ -55,6 +55,11 @@ from .views.disease_locations_views import (
     disease_locations_similar,
     disease_locations_all,
 )
+from .views.retrain_views import (
+    trigger_retrain,
+    retrain_status,
+    retrain_dataset_info,
+)
 
 from django.conf import settings
 from django.conf.urls.static import static
@@ -117,4 +122,9 @@ path('model-settings/update/', update_model_settings, name='update_model_setting
     # disease locations for map
     path('disease-locations/similar/', disease_locations_similar, name='disease_locations_similar'),
     path('disease-locations/all/', disease_locations_all, name='disease_locations_all'),
+
+    # model retraining
+    path('retrain/', trigger_retrain, name='trigger_retrain'),
+    path('retrain/status/', retrain_status, name='retrain_status'),
+    path('retrain/dataset-info/', retrain_dataset_info, name='retrain_dataset_info'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

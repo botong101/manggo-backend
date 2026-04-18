@@ -16,6 +16,9 @@ from .views import (
     bulk_update_images,
     upload_image,
     export_dataset,
+
+    # User history
+    user_analysis_history,
 )
 from .views.admin_dashboard_views import disease_trends
 from .views.health_views import health_check
@@ -83,6 +86,7 @@ urlpatterns = [
     
     #admin panel
     path('disease-statistics/', disease_statistics, name='disease_statistics'),
+    path('history/', user_analysis_history, name='user_analysis_history'),
     path('disease-trends/', disease_trends, name='disease_trends'),
     path('classified-images/', classified_images_list, name='classified_images_list'),
     path('classified-images/<int:pk>/', classified_images_detail, name='classified_images_detail'),

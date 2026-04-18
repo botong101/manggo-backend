@@ -16,6 +16,7 @@ from .media_views import (
     test_media_access,
     debug_image_url
 )
+from .history_views import user_analysis_history
 from .utils import (
     get_client_ip,
     validate_password_strength,
@@ -51,6 +52,9 @@ __all__ = [
     'serve_media_file',
     'test_media_access',
     'debug_image_url',
+
+    # User history
+    'user_analysis_history',
     
     # Utils
     'get_client_ip',

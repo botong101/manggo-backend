@@ -7,6 +7,7 @@ from django.http import JsonResponse, HttpResponse
 from django.db.models import Count, Q
 from django.utils import timezone
 from datetime import datetime, timedelta
+from functools import wraps
 import json
 import traceback
 from django.contrib.auth.models import User
@@ -18,6 +19,39 @@ from ..serializers import (
 from .ml_views import get_active_model_path
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+
+
+def require_admin_user(view_func):
+    """Restrict endpoint access to authenticated superusers only."""
+
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        # These handlers are regular Django views, so resolve JWT auth here.
+        if not request.user.is_authenticated:
+            try:
+                auth_result = JWTAuthentication().authenticate(request)
+                if auth_result is not None:
+                    request.user = auth_result[0]
+            except (InvalidToken, TokenError, Exception):
+                pass
+
+        if not request.user.is_authenticated:
+            return JsonResponse({
+                'success': False,
+                'error': 'Authentication required.'
+            }, status=401)
+
+        if not request.user.is_superuser:
+            return JsonResponse({
+                'success': False,
+                'error': 'Admin privileges required.'
+            }, status=403)
+
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
 
 
 
@@ -91,6 +125,7 @@ def get_top_predictions_for_image(image):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def disease_statistics(request):
     """stats for dashboard"""
     try:
@@ -166,6 +201,7 @@ def disease_statistics(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def classified_images_list(request):
     """get list of images with pagination"""
     try:
@@ -176,6 +212,7 @@ def classified_images_list(request):
         disease_filter = request.GET.get('disease', '')
         disease_type_filter = request.GET.get('disease_type', '')
         verified_filter = request.GET.get('verified', '')
+        uploader_scope = request.GET.get('uploader_scope', 'all').strip().lower()
         
         # build the query
         queryset = MangoImage.objects.all().order_by('-uploaded_at')  # newest first
@@ -196,6 +233,13 @@ def classified_images_list(request):
         if verified_filter:
             is_verified = verified_filter.lower() == 'true'
             queryset = queryset.filter(is_verified=is_verified)
+
+        if uploader_scope == 'users':
+            queryset = queryset.filter(user__isnull=False)
+        elif uploader_scope == 'admins':
+            queryset = queryset.filter(user__is_superuser=True)
+        elif uploader_scope == 'anonymous':
+            queryset = queryset.filter(user__isnull=True)
         
         # Pagination
         total_count = queryset.count()
@@ -229,6 +273,7 @@ def classified_images_list(request):
 
 @csrf_exempt 
 @require_http_methods(["GET", "PUT", "DELETE"])
+@require_admin_user
 def classified_images_detail(request, pk):
     """get update or delete single image"""
     try:
@@ -280,6 +325,7 @@ def classified_images_detail(request, pk):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@require_admin_user
 def bulk_update_images(request):
     """update bunch of images at once"""
     try:
@@ -314,6 +360,7 @@ def bulk_update_images(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@require_admin_user
 def upload_image(request):
     """upload new image"""
     try:
@@ -348,6 +395,7 @@ def upload_image(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def export_dataset(request):
     """dump all data"""
     try:
@@ -384,6 +432,7 @@ def export_dataset(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def image_prediction_details(request, pk):
     """get all prediction info for one image"""
     try:
@@ -458,6 +507,7 @@ def image_prediction_details(request, pk):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@require_admin_user
 def store_prediction_data(request, pk):
     """save prediction data from mobile app"""
     try:
@@ -488,6 +538,7 @@ def store_prediction_data(request, pk):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def users_list(request):
     """get list of users with their info"""
     try:
@@ -540,6 +591,7 @@ def users_list(request):
 
 @csrf_exempt
 @require_http_methods(["GET", "PUT"])
+@require_admin_user
 def user_detail(request, user_id):
     """get or update single user"""
     try:
@@ -595,6 +647,7 @@ def user_detail(request, user_id):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def user_images(request, user_id):
     """get all images from one user"""
     try:
@@ -717,6 +770,7 @@ def disease_trends(request):
 
 @csrf_exempt
 @require_http_methods(["GET"])
+@require_admin_user
 def user_statistics(request):
     """user stats for admin dashboard"""
     try:

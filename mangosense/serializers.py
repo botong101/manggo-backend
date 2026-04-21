@@ -82,10 +82,9 @@ class MangoImageSerializer(serializers.ModelSerializer):
         ]
 
     def get_image_url(self, obj):
-        request = self.context.get('request')
-        if request is not None:
-            return request.build_absolute_uri(obj.image.url)
-        return obj.image.url if obj.image else None
+        if not obj.image:
+            return None
+        return obj.image.url  # already absolute — S3Boto3Storage returns full Supabase URL
 
 class MangoImageUpdateSerializer(serializers.ModelSerializer):
     """for updating mango image records"""

@@ -65,14 +65,27 @@ CORS_ALLOW_CREDENTIALS = True
 # Media files supabase s3
 _SUPABASE_REF = os.environ.get('SUPABASE_PROJECT_REF', '')
 
-DEFAULT_FILE_STORAGE   = 'storages.backends.s3boto3.S3Boto3Storage'
-AWS_S3_ENDPOINT_URL    = f'https://{_SUPABASE_REF}.supabase.co/storage/v1/s3'
-AWS_ACCESS_KEY_ID      = os.environ.get('SUPABASE_S3_KEY')
-AWS_SECRET_ACCESS_KEY  = os.environ.get('SUPABASE_S3_SECRET')
+# Django 5.x requires STORAGES dict — DEFAULT_FILE_STORAGE is ignored in Django 5
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+# S3 write endpoint — uses .storage.supabase.co (from Supabase Storage → S3 Configuration)
+AWS_S3_ENDPOINT_URL     = f'https://{_SUPABASE_REF}.storage.supabase.co/storage/v1/s3'
+AWS_ACCESS_KEY_ID       = os.environ.get('SUPABASE_S3_KEY')
+AWS_SECRET_ACCESS_KEY   = os.environ.get('SUPABASE_S3_SECRET')
 AWS_STORAGE_BUCKET_NAME = 'mango-images'
-AWS_S3_REGION_NAME     = 'us-east-1'   # required by boto3 even though Supabase ignores it
-AWS_DEFAULT_ACL        = 'public-read'
-AWS_QUERYSTRING_AUTH   = False          # public bucket — no signed URLs needed
+AWS_S3_REGION_NAME      = 'ap-southeast-1'
+AWS_DEFAULT_ACL         = 'public-read'
+AWS_QUERYSTRING_AUTH    = False
+# Public read URL — uses .supabase.co (different subdomain from S3 endpoint)
+# Makes obj.image.url return /object/public/... instead of the S3 API path
+AWS_S3_CUSTOM_DOMAIN    = f'{_SUPABASE_REF}.supabase.co/storage/v1/object/public/mango-images'
 
 MEDIA_URL = f'https://{_SUPABASE_REF}.supabase.co/storage/v1/object/public/mango-images/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')  # kept as fallback, not actively used
@@ -166,7 +179,7 @@ import dj_database_url
 DATABASES = {
     'default': dj_database_url.config(
         default=os.environ.get('DATABASE_URL'),
-        conn_max_age=0, #disable persistent connections (required for Supabase PgBouncer safety)
+        conn_max_age=60,
         ssl_require=True,
     )
 }

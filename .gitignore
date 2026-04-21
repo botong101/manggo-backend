@@ -85,3 +85,6 @@ staticfiles/
 *.zip
 *.tar.gz
 *.rar
+
+#secrets 
+.env

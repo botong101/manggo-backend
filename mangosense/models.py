@@ -72,6 +72,12 @@ class MangoImage(models.Model):
             self.disease_classification = self.predicted_class
         super().save(*args, **kwargs)
 
+    def delete(self, *args, **kwargs):
+        # remove the file from S3 before deleting the DB record
+        if self.image:
+            self.image.delete(save=False)
+        super().delete(*args, **kwargs)
+
 class PredictionLog(models.Model):
     #logs when ai does prediction
     image = models.ForeignKey(MangoImage, on_delete=models.CASCADE)

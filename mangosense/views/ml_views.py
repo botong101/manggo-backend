@@ -569,6 +569,17 @@ def predict_image(request):
                 # how long did it take
                 processing_time = time.time() - start_time
                 
+                # PIL.Image.open() consumed the file pointer during preprocessing.
+                # Reset to start so S3Boto3Storage uploads the full file, not 0 bytes.
+                image_file.seek(0)
+
+                # Give the file a unique temp name before S3 upload.
+                # The mobile app always sends "image.jpg" which would overwrite
+                # the previous file in the bucket on every detection.
+                import uuid as _uuid
+                _ext = os.path.splitext(image_file.name)[-1].lower() or '.jpg'
+                image_file.name = f"tmp_{_uuid.uuid4().hex}{_ext}"
+
                 mango_image = MangoImage.objects.create(
                     image=image_file,
                     original_filename=image_file.name,
@@ -596,7 +607,36 @@ def predict_image(request):
                 )
                 log_prediction_activity(request.user, mango_image.id, prediction_summary)
                 saved_image_id = mango_image.id
-                
+
+                # Rename S3 file to {id}_{disease}_{confidence}pct.ext
+                # S3 has no native rename — copy to new key then delete old key.
+                try:
+                    import boto3 as _boto3
+                    disease_slug = mango_image.predicted_class.replace(' ', '_')
+                    conf_pct = int(mango_image.confidence_score * 100)
+                    _ext_final = os.path.splitext(mango_image.image.name)[-1] or '.jpg'
+                    old_key = mango_image.image.name
+                    new_key = f"mango_images/{mango_image.id}_{disease_slug}_{conf_pct}pct{_ext_final}"
+
+                    _s3 = _boto3.client(
+                        's3',
+                        endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+                        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                        region_name=settings.AWS_S3_REGION_NAME,
+                    )
+                    _s3.copy_object(
+                        Bucket=settings.AWS_STORAGE_BUCKET_NAME,
+                        CopySource={'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': old_key},
+                        Key=new_key,
+                    )
+                    _s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=old_key)
+
+                    mango_image.image.name = new_key
+                    mango_image.save(update_fields=['image'])
+                except Exception as _rename_err:
+                    print(f"[RENAME WARNING] S3 rename failed, keeping temp name: {_rename_err}")
+
                 # make notif for admin
                 try:
                     # get user who uploaded or find an admin
@@ -622,7 +662,9 @@ def predict_image(request):
                     print(f"Error creating notification: {notification_error}")
                     # dont break everything if notif fails
             except Exception as e:
-                print(f"Error saving image to database: {e}")
+                import traceback
+                print(f"[S3 UPLOAD ERROR] {type(e).__name__}: {e}")
+                print(traceback.format_exc())
                 saved_image_id = None
 
         # clean up memory

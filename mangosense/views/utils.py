@@ -4,6 +4,7 @@ import json
 import os
 import uuid
 from PIL import Image
+import numpy as np
 
 def get_client_ip(request):
     """get users ip address"""
@@ -90,47 +91,83 @@ def sanitize_filename(filename):
     filename = re.sub(r'[-\s]+', '_', filename)
     return filename
 
-def get_prediction_summary(predictions, class_names):
-    """organize ai prediction results"""
-    import numpy as np
+def get_prediction_summary(prediction, class_names):
+    """
+    Process prediction results and return a structured summary.
     
-    # get top 3
-    top_3_indices = np.argsort(predictions)[-3:][::-1]
+    Args:
+        prediction: numpy array of prediction probabilities
+        class_names: list of class names
     
-    summary = {
-        'primary_prediction': {
-            'disease': class_names[top_3_indices[0]],
-            'confidence': float(predictions[top_3_indices[0]]) * 100
-        },
-        'top_3': [],
-        'confidence_level': calculate_confidence_level(predictions[top_3_indices[0]])
-    }
-    
-    for i, idx in enumerate(top_3_indices):
-        confidence = float(predictions[idx]) * 100
-        summary['top_3'].append({
-            'rank': i + 1,
-            'disease': class_names[idx],
-            'confidence': round(confidence, 2),
-            'confidence_formatted': f"{confidence:.2f}%"
-        })
-    
-    return summary
+    Returns:
+        dict with prediction summary
+    """
+    try:
+        # FIX: Ensure prediction is a 1D array
+        prediction = np.array(prediction)
+        if len(prediction.shape) > 1:
+            prediction = prediction.flatten()
+        
+        # Get top prediction with proper integer conversion
+        top_index = int(np.argmax(prediction))
+        top_confidence = float(prediction[top_index]) * 100.0
+        top_disease = class_names[top_index]
+        
+        # Get top 3 predictions
+        # FIX: Use argsort properly and convert to Python list
+        top_3_indices = np.argsort(prediction)[-3:][::-1]
+        top_3_indices = [int(idx) for idx in top_3_indices]  # Convert to Python ints
+        
+        top_3_predictions = []
+        for idx in top_3_indices:
+            top_3_predictions.append({
+                'disease': class_names[idx],
+                'confidence': float(prediction[idx]) * 100.0,
+                'treatment': None  # Will be filled later
+            })
+        
+        # Determine confidence level
+        confidence_level = calculate_confidence_level(top_confidence)
+        
+        return {
+            'primary_prediction': {
+                'disease': top_disease,
+                'confidence': top_confidence
+            },
+            'top_3': top_3_predictions,
+            'confidence_level': confidence_level
+        }
+        
+    except Exception as e:
+        print(f"Error in get_prediction_summary: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def log_prediction_activity(user, image_id, prediction_result):
-    """log prediction for analytics"""
+    """log prediction for analytics - handles anonymous users"""
     from django.utils import timezone
     import logging
     
     logger = logging.getLogger('mangosense.predictions')
     
+    # Safely get user ID
+    user_id = None
+    if user is not None:
+        try:
+            if hasattr(user, 'is_authenticated') and user.is_authenticated:
+                if hasattr(user, 'id'):
+                    user_id = user.id
+        except Exception as e:
+            print(f"Error accessing user ID: {e}")
+    
     log_data = {
-        'user_id': user.id if user and user.is_authenticated else None,
+        'user_id': user_id,
         'image_id': image_id,
         'prediction': prediction_result.get('primary_prediction', {}).get('disease'),
         'confidence': prediction_result.get('primary_prediction', {}).get('confidence'),
         'timestamp': timezone.now().isoformat(),
-        'ip_address': getattr(user, 'ip_address', None)
+        'is_anonymous': user_id is None
     }
     
     logger.info(f"Prediction logged: {log_data}")
@@ -172,20 +209,34 @@ def paginate_queryset(queryset, page_number, page_size=20):
         }
     }
 
-def create_api_response(success=True, message="", data=None, errors=None, error_code=None, status_code=200):
-    """make consistent api responses"""
-    response_data = {
+def create_api_response(success=True, message='', data=None, errors=None, error_code=None):
+    """
+    Create a standardized API response.
+    
+    Args:
+        success: Boolean indicating success/failure
+        message: Human-readable message
+        data: Response data (dict)
+        errors: List of error messages
+        error_code: Specific error code for frontend handling
+    
+    Returns:
+        dict: Standardized response
+    """
+    from django.utils import timezone
+    
+    response = {
         'success': success,
         'message': message,
         'data': data or {},
-        'timestamp': timezone.now().isoformat()  # timezone is now imported
+        'timestamp': timezone.now().isoformat()
     }
     
-    if errors:
-        response_data['errors'] = errors
-    
     if error_code:
-        response_data['error_code'] = error_code
+        response['error_code'] = error_code
     
-    return response_data
+    if errors:
+        response['errors'] = errors if isinstance(errors, list) else [errors]
+    
+    return response
 

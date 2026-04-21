@@ -285,38 +285,3 @@ def delete_selected_notifications(request):
         )
 
 
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def mark_all_notifications_read(request):
-    """
-    mark all notifications read for user
-    """
-    try:
-        # mark all unread as read
-        updated_count = Notification.objects.filter(is_read=False).update(is_read=True)
-        
-        return Response({
-            'status': 'success',
-            'message': f'Marked {updated_count} notifications as read',
-            'updated_count': updated_count
-        })
-        
-    except Exception as e:
-        return Response(
-            {'error': f'Failed to mark all notifications as read: {str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-        # Mark all notifications as read (or filter by user if needed)
-        updated_count = Notification.objects.filter(is_read=False).update(is_read=True)
-        
-        return Response({
-            'status': 'success',
-            'message': f'Marked {updated_count} notifications as read',
-            'updated_count': updated_count
-        })
-        
-    except Exception as e:
-        return Response(
-            {'error': f'Failed to mark all notifications as read: {str(e)}'}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )

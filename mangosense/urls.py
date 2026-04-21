@@ -3,10 +3,10 @@ from .views import (
     # Authentication
     register_api, login_api, logout_api,
     admin_login_api, admin_refresh_token,
-    
+
     # ML Prediction
     predict_image, test_model_status,
-    
+
     # Admin Dashboard APIs
     disease_statistics,
     classified_images_list,
@@ -16,7 +16,11 @@ from .views import (
     bulk_update_images,
     upload_image,
     export_dataset,
+
+    # User history
+    user_analysis_history,
 )
+from .views.admin_dashboard_views import disease_trends
 from .views.health_views import health_check
 from .views.admin_dashboard_views import (
     #user API for managemnet
@@ -59,6 +63,11 @@ from .views.disease_locations_views import (
     disease_locations_similar,
     disease_locations_all,
 )
+from .views.retrain_views import (
+    trigger_retrain,
+    retrain_status,
+    retrain_dataset_info,
+)
 
 from django.conf import settings
 from django.conf.urls.static import static
@@ -82,6 +91,8 @@ urlpatterns = [
     
     #admin panel
     path('disease-statistics/', disease_statistics, name='disease_statistics'),
+    path('history/', user_analysis_history, name='user_analysis_history'),
+    path('disease-trends/', disease_trends, name='disease_trends'),
     path('classified-images/', classified_images_list, name='classified_images_list'),
     path('classified-images/<int:pk>/', classified_images_detail, name='classified_images_detail'),
     path('classified-images/<int:pk>/prediction-details/', image_prediction_details, name='image_prediction_details'),
@@ -125,4 +136,9 @@ urlpatterns = [
     # disease locations for map
     path('disease-locations/similar/', disease_locations_similar, name='disease_locations_similar'),
     path('disease-locations/all/', disease_locations_all, name='disease_locations_all'),
+
+    # model retraining
+    path('retrain/', trigger_retrain, name='trigger_retrain'),
+    path('retrain/status/', retrain_status, name='retrain_status'),
+    path('retrain/dataset-info/', retrain_dataset_info, name='retrain_dataset_info'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

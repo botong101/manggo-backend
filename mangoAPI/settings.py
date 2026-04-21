@@ -13,7 +13,9 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
+from dotenv import load_dotenv
 
+load_dotenv()  # loads .env from project root
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -42,6 +44,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'mangosense',
+    'storages',
 ]
 
 MIDDLEWARE = [
@@ -59,9 +62,20 @@ MIDDLEWARE = [
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-# Media files
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Media files supabase s3
+_SUPABASE_REF = os.environ.get('SUPABASE_PROJECT_REF', '')
+
+DEFAULT_FILE_STORAGE   = 'storages.backends.s3boto3.S3Boto3Storage'
+AWS_S3_ENDPOINT_URL    = f'https://{_SUPABASE_REF}.supabase.co/storage/v1/s3'
+AWS_ACCESS_KEY_ID      = os.environ.get('SUPABASE_S3_KEY')
+AWS_SECRET_ACCESS_KEY  = os.environ.get('SUPABASE_S3_SECRET')
+AWS_STORAGE_BUCKET_NAME = 'mango-images'
+AWS_S3_REGION_NAME     = 'us-east-1'   # required by boto3 even though Supabase ignores it
+AWS_DEFAULT_ACL        = 'public-read'
+AWS_QUERYSTRING_AUTH   = False          # public bucket — no signed URLs needed
+
+MEDIA_URL = f'https://{_SUPABASE_REF}.supabase.co/storage/v1/object/public/mango-images/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')  # kept as fallback, not actively used
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8100",  # Default Ionic serve port
@@ -140,11 +154,21 @@ WSGI_APPLICATION = 'mangoAPI.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
+""" DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
+} """
+
+import dj_database_url
+
+DATABASES = {
+    'default': dj_database_url.config(
+        default=os.environ.get('DATABASE_URL'),
+        conn_max_age=0, #disable persistent connections (required for Supabase PgBouncer safety)
+        ssl_require=True,
+    )
 }
 
 

@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_extensions',
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework.authtoken',
@@ -74,7 +75,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",  
     "http://127.0.0.1:8000",
     "http://localhost",       
-    "https://localhost",     
+    "https://localhost", 
+    "https://172.28.6.157:8000",
+    "http://172.28.6.157:8000",    
     "capacitor://localhost",  
     "ionic://localhost",
     # Production URLs

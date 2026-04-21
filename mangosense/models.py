@@ -56,6 +56,9 @@ class MangoImage(models.Model):
     location_accuracy_confirmed = models.BooleanField(null=True, blank=True) 
     location_address = models.TextField(blank=True) 
     location_source = models.CharField(max_length=20, blank=True) 
+    #training data gate - admin approves a record for retraining
+    training_ready = models.BooleanField(default=False)
+    training_notes = models.TextField(blank=True)
     
     class Meta:
         ordering = ['-uploaded_at']

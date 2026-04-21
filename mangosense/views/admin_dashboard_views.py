@@ -711,3 +711,116 @@ def user_statistics(request):
             'success': False,
             'error': f'Internal server error: {str(e)}'
         }, status=500)
+
+# ================ TRAINING DATA EDITOR ================
+@csrf_exempt
+@require_http_methods(["GET", "PATCH"])
+def training_data_detail(request, pk):
+    """GET or PATCH training_ready / training_notes for a single image."""
+    try:
+        image = MangoImage.objects.get(pk=pk)
+    except MangoImage.DoesNotExist:
+        return JsonResponse({"success": False, "error": "Image not found"}, status=404)
+    
+    if request.method == "GET":
+        return JsonResponse({
+            "success": True,
+            "data": {
+                "id": image.id,
+                "original_filename": image.original_filename,
+                "predicted_class": image.predicted_class,
+                "disease_type": image.disease_type,
+                "disease_classification": image.disease_classification,
+                "is_verified": image.is_verified,
+                "training_ready": image.training_ready,
+                "training_notes": image.training_notes,
+                "selected_symptoms": image.selected_symptoms,
+                "uploaded_at": image.uploaded_at.isoformat(),
+            }
+        })
+    
+    # PATCH
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+        
+    allowed = {"training_ready", "training_notes", "disease_classification"}
+    for field in allowed:
+        if field in data:
+            setattr(image,field, data[field])
+    image.save()
+
+    return JsonResponse({
+        "success": True,
+        "message": "Record Updated.",
+        "data": {
+            "id": image.id,
+            "training_ready": image.training_ready,
+            "training_notes": image.training_notes,
+            "disease_classification": image.disease_classification,
+        }
+    })
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def training_data_summary(request):
+    """Counts of training-ready records broken down by disease class."""
+    from django.db.models import Count
+
+    breakdown = (
+        MangoImage.objects
+        .filter(training_ready=True, selected_symptoms__isnull=False)
+        .values("disease_classification", "disease_type")
+        .annotate(count=Count("id"))
+        .order_by("disease_type", "disease_classification")
+    )
+
+    total_ready = MangoImage.objects.filter(training_ready=True).count()
+    total_verified = MangoImage.objects.filter(is_verified=True).count()
+    total_verified_not_approved = MangoImage.objects.filter(
+        is_verified=True, training_ready=False
+    ).count()
+
+    return JsonResponse({
+        "success": True,
+        "data": {
+            "total_training_ready": total_ready,
+            "total_verified": total_verified,
+            "verified_not_yet_approved": total_verified_not_approved,
+            "breakdown_by_class": list(breakdown),
+        }
+    })
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def training_data_bulk_approve(request):
+    """Bulk set training_ready on a list of image IDs.
+    Body: {"image_ids": [1, 2, 3], "training_ready": true, "training_notes": "optional"}
+    """
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+    
+    image_ids = data.get("image_ids", [])
+    if not isinstance(image_ids, list) or not image_ids:
+        return JsonResponse({"success": False, "error": "image_ids must be a non-empty list"}, status=400)
+    
+
+    training_ready = data.get("training_ready", True)
+    training_notes = data.get("training_notes", "")
+
+    update_fields = {"training_ready": training_ready}
+    if training_notes:
+        update_fields["training_notes"] = training_notes
+
+    updated = MangoImage.objects.filter(id__in=image_ids).update(**update_fields)
+
+    return JsonResponse({
+        "success": True,
+        "message": f"{updated} record(s) updated.",
+        "updated_count": updated,
+        "training_ready": training_ready,
+    })

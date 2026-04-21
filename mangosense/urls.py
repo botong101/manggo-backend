@@ -24,6 +24,11 @@ from .views.admin_dashboard_views import (
     user_detail,
     user_images,
     user_statistics,
+
+    #training data editor
+    training_data_detail,
+    training_data_summary,
+    training_data_bulk_approve
 )
 from .views.media_views import (
     #serving images
@@ -109,8 +114,13 @@ urlpatterns = [
     path('users/statistics/', user_statistics, name='user_statistics'),
 
     # model settings
-path('model-settings/', get_model_settings, name='get_model_settings'),
-path('model-settings/update/', update_model_settings, name='update_model_settings'),
+    path('model-settings/', get_model_settings, name='get_model_settings'),
+    path('model-settings/update/', update_model_settings, name='update_model_settings'),
+
+    #training data editor
+    path('training-data/<int:pk>/', training_data_detail, name='training_data_detail'),
+    path('training-data/summary/', training_data_summary, name='training_data_summary'),
+    path('training-data/bulk-approve/', training_data_bulk_approve, name='training_data_bulk_approve'),
 
     # disease locations for map
     path('disease-locations/similar/', disease_locations_similar, name='disease_locations_similar'),

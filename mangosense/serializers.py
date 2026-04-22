@@ -73,6 +73,7 @@ class MangoImageSerializer(serializers.ModelSerializer):
             'confidence_score', 'uploaded_at', 'is_verified', 'notes', 'disease_classification',
             'verified_by', 'verified_date', 'disease_type', 'user_feedback', 'user_confirmed_correct',
             'latitude', 'longitude', 'location_address', 'location_source', 'location_consent_given', 'location_accuracy_confirmed',
+            'training_ready', 'training_notes',
             #symptoms stuff
             'selected_symptoms', 'primary_symptoms', 'alternative_symptoms', 'detected_disease', 'top_diseases', 'symptoms_data'
         ]

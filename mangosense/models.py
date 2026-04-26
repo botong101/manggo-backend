@@ -187,3 +187,191 @@ class ModelConfig(models.Model):
 
     def __str__(self):
         return f"{self.detection_type}: {self.model_filename}"
+
+
+class Symptom(models.Model):
+    """
+    One canonical symptom key per plant part.
+
+    A 'canonical' key is the authoritative snake_case string stored in
+    MangoImage.selected_symptoms and used as XGBoost feature column names.
+
+    IMPORTANT — vector_index ordering:
+        vector_index=N means this symptom occupies feature column N in the
+        XGBoost binary vector.  The value comes from enumerate(LEAF_SYMPTOMS)
+        or enumerate(FRUIT_SYMPTOMS) at seed time.  Never reassign these values
+        after any model has been trained — doing so invalidates saved .json
+        classifier files without any runtime error.
+
+        Symptoms from SYMPTOMS_MAP that are NOT in the vocabulary (e.g. canker_*,
+        weevil_*, gall_*, healthy_*) have vector_index=None and is_in_vocabulary=False.
+    """
+
+    PLANT_PART_CHOICES = [
+        ('leaf',  'Leaf'),
+        ('fruit', 'Fruit'),
+    ]
+
+    key = models.SlugField(
+        max_length=80,
+        help_text="Canonical snake_case key, e.g. 'dark_spots_brown'.",
+    )
+
+    plant_part = models.CharField(
+        max_length=10,
+        choices=PLANT_PART_CHOICES,
+        help_text="Which part of the plant this symptom describes.",
+    )
+
+    vector_index = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Column index in the XGBoost feature vector. "
+            "None for symptoms outside the classifier vocabulary."
+        ),
+    )
+
+    is_in_vocabulary = models.BooleanField(
+        default=False,
+        help_text=(
+            "True if this key appears in LEAF_SYMPTOMS or FRUIT_SYMPTOMS "
+            "and is a valid XGBoost feature. False for display-only keys."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('key', 'plant_part')]
+        ordering = ['plant_part', 'vector_index', 'key']
+        verbose_name = 'Symptom'
+        verbose_name_plural = 'Symptoms'
+
+    def __str__(self) -> str:
+        idx = f"[{self.vector_index}]" if self.vector_index is not None else "[—]"
+        return f"{self.plant_part}:{self.key} {idx}"
+    
+class SymptomAlias(models.Model):
+    """
+    Maps a variant or legacy string to one canonical Symptom row.
+
+    Example:  alias='acervuli'  →  canonical=Symptom(key='black_specks_in_lesion', plant_part='leaf')
+
+    Aliases are looked up by the normalize_symptom() utility before indexing
+    into the XGBoost feature vector.  They are also useful for accepting
+    informal strings from older mobile app versions.
+    """
+    alias = models.SlugField(
+        max_length=120,
+        unique=True,
+        help_text="The variant / legacy string that will be resolved.",
+    )
+    canonical = models.ForeignKey(
+        Symptom,
+        on_delete=models.CASCADE,
+        related_name='aliases',
+        help_text="The canonical symptom this alias resolves to.",
+    )
+    source = models.CharField(
+        max_length=200,
+        blank = True,
+        help_text= "Helps auditors trace where "
+    )
+
+    class Meta:
+        ordering = ['alias']
+        verbose_name = 'Symptom Alias'
+        verbose_name_plural = 'Symptom Aliases'
+
+    def __str__(self) -> str:
+        return f"'{self.alias}' → {self.canonical}"
+    
+class Disease(models.Model):    
+    """
+    A disease class that the system can recognise or display.
+
+    is_in_classifier=True  →  the disease appears in LEAF_DISEASES or FRUIT_DISEASES
+                               and is a valid output label for the XGBoost and CNN models.
+    is_in_classifier=False →  future/display-only diseases such as Bacterial Canker,
+                               Cutting Weevil, Gall Midge that have SYMPTOMS_MAP entries
+                               but are not yet in the trained classifier.
+    """
+    PLANT_PART_CHOICES = [
+        ('leaf',  'Leaf'),
+        ('fruit', 'Fruit'),
+    ]
+
+    name = models.CharField(
+        max_length=100,
+        help_text="readable disease name matching LEAF_CLASS_NAMES / FRUIT_CLASS_NAMES.",
+    )
+
+    plant_part = models.CharField(
+        max_length=10,
+        choices=PLANT_PART_CHOICES,
+    )
+
+    is_in_classifier = models.BooleanField(
+        default=False,
+        help_text=(
+            "True if this disease is a valid prediction label in the current "
+            "trained XGBoost / CNN models."
+        ),
+    )
+
+    class Meta:
+        unique_together = [('name', 'plant_part')]
+        ordering = ['plant_part', 'name']
+        verbose_name = 'Disease'
+        verbose_name_plural = 'Diseases'
+
+    def __str__(self) -> str:
+        flag = "class found" if self.is_in_classifier else "is not in class"
+        return f"{self.plant_part}:{self.name} [{flag}]"
+    
+class DiseaseSymptom(models.Model):
+    """
+    Through-table connecting a Disease to a Symptom with UI display metadata.
+
+    This replaces the SYMPTOMS_MAP dict in symptom_views.py.
+
+    display_label  — The verbose, human-friendly string shown in the mobile app
+                     checklist, e.g. "Irregular brown or black spots on leaves".
+                     The same Symptom key (e.g. black_sooty_coating) can have
+                     different display_label values for different diseases because
+                     the clinical significance differs.
+
+    display_order  — Zero-based sort position within this disease's symptom list.
+                     The mobile app renders symptoms in this order, not alphabetical.
+    """
+    disease = models.ForeignKey(
+        Disease,
+        on_delete = models.CASCADE,
+        related_name = 'disease_symproms',
+    )
+
+    symptom = models.ForeignKey(
+        Symptom,
+        on_delete=models.PROTECT, 
+        related_name='disease_symptoms',
+    )
+
+    display_label = models.CharField(
+        max_length=300,
+        help_text="Verbose UI string shown to the user in the mobile symptom checklist.",
+    )
+
+    display_order = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Sort order within the disease's symptom list (0-based).",
+    )
+
+    class Meta:
+        # One disease cannot have the same symptom at two different positions.
+        unique_together = [('disease', 'display_order')]
+        ordering = ['disease', 'display_order']
+        verbose_name = 'Disease–Symptom Link'
+        verbose_name_plural = 'Disease–Symptom Links'
+    def __str__(self) -> str:
+        return f"{self.disease.name} ({self.disease.plant_part}) #{self.display_order} → {self.symptom.key}"

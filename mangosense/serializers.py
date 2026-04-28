@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from .models import MangoImage, MLModel, PredictionLog, UserProfile
+from .models import MangoImage, MLModel, PredictionLog, UserProfile, Symptom, SymptomAlias, Disease, DiseaseSymptom
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -85,7 +85,7 @@ class MangoImageSerializer(serializers.ModelSerializer):
     def get_image_url(self, obj):
         if not obj.image:
             return None
-        return obj.image.url  # already absolute — S3Boto3Storage returns full Supabase URL
+        return obj.image.url  
 
 class MangoImageUpdateSerializer(serializers.ModelSerializer):
     """for updating mango image records"""
@@ -166,3 +166,41 @@ class ImageUploadSerializer(serializers.Serializer):
             raise serializers.ValidationError("Only JPEG and PNG images are allowed")
         
         return value
+    
+# Symptom / Disease serializers
+
+class SymptomSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Symptom
+        fields = ['id', 'key', 'plant_part', 'vector_index', 'is_in_vocabulary', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class SymptomAliasSerializer(serializers.ModelSerializer):
+    canonical_key = serializers.CharField(source='canonical.key', read_only=True)
+
+    class Meta:
+        model = SymptomAlias
+        fields = ['id', 'alias', 'canonical', 'canonical_key', 'source']
+        read_only_fields = ['id']
+
+
+class DiseaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Disease
+        fields = ['id', 'name', 'plant_part', 'is_in_classifier']
+        read_only_fields = ['id']
+
+
+class DiseaseSymptomSerializer(serializers.ModelSerializer):
+    disease_name = serializers.CharField(source='disease.name', read_only=True)
+    symptom_key = serializers.CharField(source='symptom.key', read_only=True)
+
+    class Meta:
+        model = DiseaseSymptom
+        fields = [
+            'id', 'disease', 'disease_name',
+            'symptom', 'symptom_key',
+            'display_label', 'display_order',
+        ]
+        read_only_fields = ['id']

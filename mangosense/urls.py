@@ -68,6 +68,13 @@ from .views.retrain_views import (
     retrain_status,
     retrain_dataset_info,
 )
+from .views.symptom_admin_views import (
+    symptom_list, symptom_detail,
+    alias_list, alias_detail,
+    disease_list, disease_detail,
+    disease_symptom_list, disease_symptom_detail,
+)
+
 from .views.symptom_views import get_disease_symptoms
 
 from django.conf import settings
@@ -145,4 +152,14 @@ urlpatterns = [
 
     # disease symptoms vocabulary
     path('symptoms/', get_disease_symptoms, name='get_disease_symptoms'),
+
+    # symptom and disease table    
+    path('admin/symptoms/', symptom_list, name='symptom_list'),
+    path('admin/symptoms/<int:primaryKey>/', symptom_detail, name='symptom_detail'),
+    path('admin/aliases/', alias_list, name='alias_list'),
+    path('admin/aliases/<int:primaryKey>/', alias_detail, name='alias_detail'),
+    path('admin/diseases/', disease_list, name='disease_list'),
+    path('admin/diseases/<int:primaryKey>/', disease_detail, name='disease_detail'),
+    path('admin/disease-symptoms/', disease_symptom_list, name='disease_symptom_list'),
+    path('admin/disease-symptoms/<int:primaryKey>/', disease_symptom_detail, name='disease_symptom_detail'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

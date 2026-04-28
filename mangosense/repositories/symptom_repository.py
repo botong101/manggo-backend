@@ -1,21 +1,10 @@
-"""
-Repository for symptom/disease DB tables.
-
-PUBLIC API
-----------
-get_vocabulary(plant_part)               -> list[str]   ordered canonical keys for encoder
-get_diseases(plant_part)                 -> list[str]   disease names for classifier labels
-normalize_symptom(raw_symptom)           -> str         raw string -> canonical key
-get_alias_map()                          -> dict[str,str] full alias table
-get_symptoms_for_disease(disease, part)  -> list[dict]  [{key, label}] for /symptoms/ endpoint
-get_fallback_symptoms()                  -> list[dict]  generic prompts for unknown disease
-invalidate_symptom_cache()               -> None        bust all caches (called by signals)
-
-
-"""
+from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mangosense.models import Disease, DiseaseSymptom, Symptom, SymptomAlias
 
 _CACHE: dict[str, Any] = {}
 _LOCK = threading.Lock()
@@ -223,4 +212,91 @@ def invalidate_symptom_cache()-> None:
         _CACHE.clear()
     
 
+# symptom write operations
+
+def create_symptom(validated_data: dict) -> Symptom:
+    from mangosense.models import Symptom  # noqa: PLC0415
+    """Insert one Symptom row. Returns the saved instance."""
+    return Symptom.objects.create(**validated_data)
+
+
+def update_symptom(symptom: Symptom, validated_data: dict) -> Symptom:
+    """Apply validated_data fields to symptom and save. Returns updated instance."""
+    for field, value in validated_data.items():
+        setattr(symptom, field, value)
+    symptom.save()
+    return symptom
+
+
+def delete_symptom(symptom: Symptom) -> None:
+    """Delete one Symptom row. Caller must have already confirmed no PROTECT links."""
+    symptom.delete()
+
+
+def symptom_has_disease_links(symptom: Symptom) -> bool:
+    """Return True if any DiseaseSymptom row references this symptom."""
+    return symptom.disease_symptoms.exists()
+
+
+# symptomAlias write operations
+
+def create_alias(validated_data: dict) -> SymptomAlias:
+    from mangosense.models import SymptomAlias  # noqa: PLC0415
+    return SymptomAlias.objects.create(**validated_data)
+
+
+def update_alias(alias: SymptomAlias, validated_data: dict) -> SymptomAlias:
+    for field, value in validated_data.items():
+        setattr(alias, field, value)
+    alias.save()
+    return alias
+
+
+def delete_alias(alias: SymptomAlias) -> None:
+    alias.delete()
+
+
+# disease write operations 
+
+def create_disease(validated_data: dict) -> Disease:
+    from mangosense.models import Disease  # noqa: PLC0415
+    return Disease.objects.create(**validated_data)
+
+
+def update_disease(disease: Disease, validated_data: dict) -> Disease:
+    for field, value in validated_data.items():
+        setattr(disease, field, value)
+    disease.save()
+    return disease
+
+
+def delete_disease(disease: Disease) -> None:
+    disease.delete()
+
+
+# diseaseSymptom write operations 
+
+def display_order_conflict_exists(disease_id: int, display_order: int, exclude_pk: int | None = None) -> bool:
+    """Return True if another DiseaseSymptom for the same disease already uses this display_order."""
+    from mangosense.models import DiseaseSymptom  # noqa: PLC0415
+    qs = DiseaseSymptom.objects.filter(disease_id=disease_id, display_order=display_order)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    return qs.exists()
+
+
+def create_disease_symptom(validated_data: dict) -> DiseaseSymptom:
+    from mangosense.models import DiseaseSymptom  # noqa: PLC0415
+    return DiseaseSymptom.objects.create(**validated_data)
+
+
+def update_disease_symptom(link: DiseaseSymptom, validated_data: dict) -> DiseaseSymptom:
+    for field, value in validated_data.items():
+        setattr(link, field, value)
+    link.save()
+    return link
+
+
+def delete_disease_symptom(link: DiseaseSymptom) -> None:
+    link.delete()
 

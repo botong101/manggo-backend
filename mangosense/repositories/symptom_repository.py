@@ -32,7 +32,7 @@ def get_vocabulary(plant_part: str) -> list[str]:
     Returns:
         list of canonical key strings, e.g. ['dark_spots_brown', ...]
     """
-    from mangosense.models import Symptom  # noqa: PLC0415
+    from mangosense.models import Symptom 
 
     normalized_part = _normalise_plant_part(plant_part)
     cache_key = f'vocabulary:{normalized_part}'

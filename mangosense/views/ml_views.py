@@ -14,9 +14,10 @@ from ..models import MangoImage, MLModel, PredictionLog, Notification
 from .utils import (
     get_client_ip, validate_image_file, get_disease_type,
     calculate_confidence_level, get_prediction_summary,
-    log_prediction_activity, 
+    log_prediction_activity,
     create_api_response
 )
+from ..ML.naive_classifier import predict_from_symptoms_naive, fuse_image_and_symptom_naive
 
 
 def get_tensorflow_runtime():
@@ -537,6 +538,22 @@ def predict_image(request):
         primary_disease = prediction_summary['primary_prediction']['disease']
         alternative_diseases = [pred['disease'] for pred in prediction_summary['top_3'][1:3]]  # top 2-3 diseases
 
+        # Step 5.2 — symptom-based naive bayes prediction and ensemble fusion
+        symptom_prediction_result = None
+        ensemble_prediction_result = None
+        if selected_symptoms:
+            image_disease_probabilities = {
+                disease_class_name: float(prediction[disease_class_index]) * 100
+                for disease_class_index, disease_class_name in enumerate(model_class_names)
+            }
+            symptom_prediction_result = predict_from_symptoms_naive(selected_symptoms, model_used)
+            if symptom_prediction_result is not None:
+                ensemble_prediction_result = fuse_image_and_symptom_naive(
+                    image_disease_probabilities,
+                    symptom_prediction_result['probabilities'],
+                    model_class_names,
+                )
+
         # save to db unless just preview
         saved_image_id = None
         if not preview_only:
@@ -707,6 +724,8 @@ def predict_image(request):
             },
             'model_used': model_used,
             'model_path': model_path,
+            'symptom_prediction': symptom_prediction_result,
+            'ensemble_prediction': ensemble_prediction_result,
             'debug_info': {
                 'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                 'model_loaded': True,

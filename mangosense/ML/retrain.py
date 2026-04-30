@@ -15,9 +15,10 @@ from django.conf import settings
 _lock = threading.Lock()
 _status: dict = {
     'is_running':      False,
-    'model_type':      None,    # 'leaf' | 'fruit'
-    'phase':           None,    # preparing | training | evaluating | saving | done | error
-    'progress':        0,       # 0–100
+    'model_type':      None,      # 'leaf' | 'fruit'
+    'classifier_type': None,      # 'cnn' | 'symptoms'
+    'phase':           None,      # preparing | training | evaluating | saving | done | error
+    'progress':        0,         # 0–100
     'message':         '',
     'started_at':      None,
     'finished_at':     None,
@@ -350,13 +351,95 @@ def _run_retraining(model_type: str, base_model_path: str, output_path: str):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# ── history recorder ──────────────────────────────────────────────────────────
+
+def _record_training_history(history_record: dict) -> None:
+    """Append one run to models/training_history.jsonl (atomic per-line append)."""
+    import json as json_module
+    from pathlib import Path
+    history_file_path = Path(settings.BASE_DIR) / 'models' / 'training_history.jsonl'
+    history_file_path.parent.mkdir(parents=True, exist_ok=True)
+    with history_file_path.open('a', encoding='utf-8') as history_file_handle:
+        history_file_handle.write(json_module.dumps(history_record) + '\n')
+
+
+# ── NB symptom classifier training thread ─────────────────────────────────────
+
+def _run_naive_retraining(plant_part: str) -> None:
+    """Naive Bayes training — runs in a background thread, updates shared _status."""
+    started_at_iso = datetime.datetime.now().isoformat()
+    try:
+        from .train_naive_classifier import train_one
+
+        _set(phase='preparing', progress=10, message='Fetching verified symptom records…')
+        training_result = train_one(plant_part)
+
+        if not training_result.get('success'):
+            raise ValueError(training_result.get('error') or 'Training reported success=False')
+
+        _set(
+            phase='done',
+            progress=100,
+            is_running=False,
+            finished_at=datetime.datetime.now().isoformat(),
+            output_filename=os.path.basename(training_result['model_path']),
+            accuracy=round(training_result['accuracy'] * 100, 2),
+            message=(
+                f"NB training complete. "
+                f"Accuracy {training_result['accuracy'] * 100:.2f}% "
+                f"on {training_result['n_test']} test samples."
+            ),
+            dataset_info=training_result.get('per_class'),
+        )
+
+        _record_training_history({
+            'recorded_at':     datetime.datetime.now().isoformat(),
+            'started_at':      started_at_iso,
+            'classifier_type': 'symptoms',
+            'plant_part':      plant_part,
+            'success':         True,
+            'accuracy':        training_result['accuracy'],
+            'n_train':         training_result['n_train'],
+            'n_test':          training_result['n_test'],
+            'per_class':       training_result['per_class'],
+            'model_path':      training_result['model_path'],
+        })
+
+    except Exception as training_exception:
+        import traceback
+        traceback.print_exc()
+        _set(
+            phase='error',
+            is_running=False,
+            finished_at=datetime.datetime.now().isoformat(),
+            error=str(training_exception),
+            message=f'NB retraining failed: {training_exception}',
+        )
+        _record_training_history({
+            'recorded_at':     datetime.datetime.now().isoformat(),
+            'started_at':      started_at_iso,
+            'classifier_type': 'symptoms',
+            'plant_part':      plant_part,
+            'success':         False,
+            'error':           f'{type(training_exception).__name__}: {training_exception}',
+        })
+
+
 # ── public entry point ─────────────────────────────────────────────────────────
 
-def start_retraining(model_type: str, base_model_path: str, output_path: str) -> bool:
-    """
-    Kick off retraining in a background daemon thread.
+def start_retraining(
+    model_type: str,
+    base_model_path: str | None = None,
+    output_path: str | None = None,
+    classifier_type: str = 'cnn',
+) -> bool:
+    """Kick off retraining in a background daemon thread.
 
     Returns True if the job was started, False if one is already running.
+
+    classifier_type:
+        'cnn'      — image disease CNN (existing behaviour)
+        'symptoms' — Bernoulli Naive Bayes symptom classifier
     """
     with _lock:
         if _status['is_running']:
@@ -364,9 +447,10 @@ def start_retraining(model_type: str, base_model_path: str, output_path: str) ->
         _status.update({
             'is_running':      True,
             'model_type':      model_type,
+            'classifier_type': classifier_type,
             'phase':           'starting',
             'progress':        0,
-            'message':         'Initialising retraining job…',
+            'message':         f'Initialising {classifier_type} retraining job…',
             'started_at':      datetime.datetime.now().isoformat(),
             'finished_at':     None,
             'output_filename': None,
@@ -375,11 +459,19 @@ def start_retraining(model_type: str, base_model_path: str, output_path: str) ->
             'dataset_info':    None,
         })
 
-    thread = threading.Thread(
-        target=_run_retraining,
-        args=(model_type, base_model_path, output_path),
-        daemon=True,
-        name=f'mangosense-retrain-{model_type}',
-    )
-    thread.start()
+    if classifier_type == 'symptoms':
+        worker_thread = threading.Thread(
+            target=_run_naive_retraining,
+            args=(model_type,),
+            daemon=True,
+            name=f'mangosense-retrain-symptoms-{model_type}',
+        )
+    else:
+        worker_thread = threading.Thread(
+            target=_run_retraining,
+            args=(model_type, base_model_path, output_path),
+            daemon=True,
+            name=f'mangosense-retrain-cnn-{model_type}',
+        )
+    worker_thread.start()
     return True

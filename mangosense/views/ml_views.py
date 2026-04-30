@@ -4,7 +4,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.http import JsonResponse
 from django.conf import settings
 from django.utils import timezone
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
 import os
 import gc
@@ -26,6 +26,8 @@ def get_tensorflow_runtime():
         return tf, None
     except Exception as exc:
         return None, str(exc)
+
+
 
 # image size for model — MUST match what the model was trained on
 # all 4 models (gate leaf, gate fruit, disease leaf, disease fruit) use 224x224
@@ -56,9 +58,9 @@ GATE_VALID_INDEX_LEAF = 4  # "Mango" is at index 4 in the leaf gate list
 GATE_VALID_INDEX_FRUIT = 3  # "Mango" is at index 3 in the fruit gate list
 
 # Minimum gate confidence thresholds
-GATE_CONFIDENCE_THRESHOLD_LEAF = 70.0  # More lenient for diseased leaves
-GATE_CONFIDENCE_THRESHOLD_FRUIT = 70.0
-GATE_CONFIDENCE_THRESHOLD = 70.0  # Default threshold
+GATE_CONFIDENCE_THRESHOLD_LEAF = 60.0  # More lenient for diseased leaves
+GATE_CONFIDENCE_THRESHOLD_FRUIT = 60.0
+GATE_CONFIDENCE_THRESHOLD = 60.0  # Default threshold
 
 # ==================== DISEASE MODEL CLASS NAMES ====================
 # diseases the leaf model knows
@@ -67,7 +69,7 @@ LEAF_CLASS_NAMES = [
 ]
 
 FRUIT_CLASS_NAMES = [
-    'Anthracnose', 'Healthy' 
+    'Alternaria', 'Anthracnose', 'Black Mold Rot', 'Healthy', 'Stem end Rot'
 ]
 
 # what to do for each disease
@@ -115,8 +117,8 @@ def get_treatment_for_disease(disease_name):
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
 # fallback filenames if DB has no config yet
-_DEFAULT_LEAF_MODEL       = 'leaf-edge-model.keras'
-_DEFAULT_FRUIT_MODEL      = 'fruit-mobilenetv2.keras'
+_DEFAULT_LEAF_MODEL       = 'mobilenetv2-leaf.keras'
+_DEFAULT_FRUIT_MODEL      = 'mobilenetv2-fruit.keras'
 _DEFAULT_GATE_LEAF_MODEL  = 'gate-leaf-model-2.keras'
 _DEFAULT_GATE_FRUIT_MODEL = 'mango-fruit-vs-others.keras'
 
@@ -149,7 +151,7 @@ def preprocess_image(image_file):
     Preprocessing for inference.
     
     The model now has architecture-specific preprocessing baked into
-    its graph (as a Lambda layer during training), so we only need to:
+    its graph (as a Rescaling layer during training), so we only need to:
       1. Resize to the expected input size
       2. Keep pixel values as float32 in [0, 255]
       3. Add batch dimension
@@ -160,7 +162,9 @@ def preprocess_image(image_file):
     All 4 models use 224x224 MobileNetV2 pretrained.
     """
     try:
-        img = Image.open(image_file).convert('RGB')
+        img = Image.open(image_file)
+        img = ImageOps.exif_transpose(img)  # fix mobile camera rotation
+        img = img.convert('RGB')
         original_size = img.size
         img = img.resize(IMG_SIZE)
         img_array = np.array(img).astype("float32")  # [0, 255] float32
@@ -169,8 +173,6 @@ def preprocess_image(image_file):
         return img_array, original_size
     except Exception as e:
         raise e
-
-
 
 
 

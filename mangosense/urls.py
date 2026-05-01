@@ -132,7 +132,7 @@ urlpatterns = [
     path('users/<int:user_id>/images/', user_images, name='user_images'),
     path('users/statistics/', user_statistics, name='user_statistics'),
 
-    # model settings
+    #model settings
     path('model-settings/', get_model_settings, name='get_model_settings'),
     path('model-settings/update/', update_model_settings, name='update_model_settings'),
 

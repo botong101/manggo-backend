@@ -146,33 +146,61 @@ def get_active_model_path(detection_type: str, is_gate: bool = False) -> str:
     return os.path.join(settings.BASE_DIR, 'models', filename)
 
 
-def preprocess_image(image_file):
+def preprocess_image(image_file, target_size=None):
     """
-    Preprocessing for inference.
-    
-    The model now has architecture-specific preprocessing baked into
-    its graph (as a Rescaling layer during training), so we only need to:
-      1. Resize to the expected input size
-      2. Keep pixel values as float32 in [0, 255]
-      3. Add batch dimension
-    
-    Do NOT normalize to [0,1] or use preprocess_input here —
-    the model handles it internally.
-    
-    All 4 models use 224x224 MobileNetV2 pretrained.
+    Preprocessing for inference — applies EXIF correction, resizes, returns
+    float32 [0, 255].  The model's internal Rescaling layer handles normalization.
+
+    target_size: (W, H) tuple; defaults to the global IMG_SIZE (224×224).
     """
     try:
         img = Image.open(image_file)
         img = ImageOps.exif_transpose(img)  # fix mobile camera rotation
         img = img.convert('RGB')
         original_size = img.size
-        img = img.resize(IMG_SIZE)
+        size = target_size if target_size else IMG_SIZE
+        img = img.resize(size)
         img_array = np.array(img).astype("float32")  # [0, 255] float32
-        img_array = np.expand_dims(img_array, axis=0)  # (1, 224, 224, 3)
-
+        img_array = np.expand_dims(img_array, axis=0)
         return img_array, original_size
     except Exception as e:
         raise e
+
+
+def _get_hybrid_specs(model):
+    """
+    For a dual-input MangoSenseNet-CoAttn model return (img_size, num_features).
+    img_size is (W, H) matching PIL's resize convention.
+    Detects by shape/rank so explicit input names are not required.
+    """
+    img_hw = None
+    num_features = None
+    for inp in model.inputs:
+        s = inp.shape
+        ndim = len(s)
+        # Image branch: (batch, H, W, C) where C == 3
+        if ndim == 4 and int(s[-1]) == 3:
+            img_hw = (int(s[2]), int(s[1]))   # PIL resize wants (W, H)
+        # Feature/symptom branch: (batch, N)
+        elif ndim == 2:
+            num_features = int(s[1])
+    return img_hw, num_features
+
+
+def _run_hybrid_model(model, image_file, img_size, num_features, symptom_vector=None):
+    """
+    Run hybrid model with image + symptom vector.
+    If symptom_vector (shape (1, num_features)) is provided, uses it directly.
+    Otherwise silences the symptom branch with zeros (image-only baseline).
+    Returns (prediction_array, processed_size).
+    Uses positional list input to avoid relying on Keras auto-generated input names.
+    """
+    img_array, _ = preprocess_image(image_file, target_size=img_size)
+    sym = symptom_vector if symptom_vector is not None \
+          else np.zeros((1, num_features), dtype=np.float32)
+    # Positional list: model.inputs[0]=image, model.inputs[1]=symptoms
+    pred = model.predict([img_array, sym])
+    return np.array(pred).flatten(), img_size
 
 
 
@@ -408,7 +436,7 @@ def predict_image(request):
                             'gate_model_path': gate_model_path,
                             'processing_time': time.time() - start_time,
                             'image_size': original_size,
-                            'processed_size': IMG_SIZE
+                            'inference_mode': 'gate_rejected'
                         }
                     },
                     message=rejection_detail
@@ -444,20 +472,100 @@ def predict_image(request):
         # load the ai model
         try:
             model = tf.keras.models.load_model(model_path)
-        except Exception as model_error:
-            return JsonResponse(
-                create_api_response(
-                    success=False,
-                    message='Failed to load ML model',
-                    errors=[str(model_error)]
-                ),
-                status=500
-            )
+        except Exception as first_load_error:
+            # Keras version mismatch: newer models may have quantization_config in Dense
+            # which older Keras versions don't recognise. Patch Dense.__init__ during
+            # load so the unknown kwarg is silently dropped, then restore immediately.
+            if 'quantization_config' in str(first_load_error):
+                _orig_dense_init = tf.keras.layers.Dense.__init__
+                def _compat_dense_init(self, *args, **kwargs):
+                    kwargs.pop('quantization_config', None)
+                    _orig_dense_init(self, *args, **kwargs)
+                tf.keras.layers.Dense.__init__ = _compat_dense_init
+                try:
+                    model = tf.keras.models.load_model(model_path)
+                except Exception as model_error:
+                    return JsonResponse(
+                        create_api_response(
+                            success=False,
+                            message='Failed to load ML model',
+                            errors=[str(model_error)]
+                        ),
+                        status=500
+                    )
+                finally:
+                    tf.keras.layers.Dense.__init__ = _orig_dense_init
+            else:
+                return JsonResponse(
+                    create_api_response(
+                        success=False,
+                        message='Failed to load ML model',
+                        errors=[str(first_load_error)]
+                    ),
+                    status=500
+                )
 
-        # run it thru the model
+        # run prediction — handle dual-input hybrid model separately
         try:
-            prediction = model.predict(img_array)
-            prediction = np.array(prediction).flatten()
+            is_hybrid = len(model.inputs) > 1
+
+            if is_hybrid:
+                # MangoSenseNet-CoAttn: two-pass self-confirming inference
+                img_size, num_features = _get_hybrid_specs(model)
+                if img_size is None:
+                    img_size = (240, 240)
+                if num_features is None:
+                    num_features = int(model.inputs[1].shape[1])
+
+                # Load class prototypes from sidecar if present
+                model_stem = os.path.splitext(os.path.basename(model_path))[0]
+                proto_path = os.path.join(os.path.dirname(model_path),
+                                          f"{model_stem}_prototypes.json")
+                prototypes = {}
+                if os.path.exists(proto_path):
+                    with open(proto_path) as _f:
+                        prototypes = json.load(_f)  # {class_name: [float, ...]}
+                    model_class_names = list(prototypes.keys())
+                # else model_class_names already set from detection_type above
+
+                # Pass 1 — zero symptoms: image branch makes the initial call
+                image_file.seek(0)
+                prediction_p1, processed_size = _run_hybrid_model(
+                    model, image_file, img_size, num_features
+                )
+
+                # Determine which prototype to use for Pass 2
+                inference_mode = "zero_symptoms"
+                symptom_vector = None
+
+                if prototypes:
+                    # User-confirmed disease takes priority; otherwise trust Pass 1
+                    if detected_disease and detected_disease in prototypes:
+                        target_class = detected_disease
+                        inference_mode = "user_confirmed_prototype"
+                    else:
+                        target_class = model_class_names[int(np.argmax(prediction_p1))]
+                        inference_mode = "self_confirmed_prototype"
+
+                    proto_values = prototypes.get(target_class)
+                    if proto_values is not None:
+                        symptom_vector = np.array([proto_values], dtype=np.float32)
+
+                # Pass 2 — prototype symptoms: refined prediction
+                if symptom_vector is not None:
+                    image_file.seek(0)
+                    prediction, processed_size = _run_hybrid_model(
+                        model, image_file, img_size, num_features, symptom_vector
+                    )
+                else:
+                    prediction = prediction_p1  # no sidecar → use Pass 1 as-is
+            else:
+                # Standard single-input model (MobileNetV2 etc.)
+                prediction = model.predict(img_array)
+                prediction = np.array(prediction).flatten()
+                processed_size = IMG_SIZE
+                inference_mode = "standard"
+
         except Exception as prediction_error:
             return JsonResponse(
                 create_api_response(
@@ -518,7 +626,8 @@ def predict_image(request):
                     'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                     'model_loaded': True,
                     'image_size': original_size,
-                    'processed_size': IMG_SIZE
+                    'processed_size': processed_size,
+                    'inference_mode': inference_mode
                 }
             }
             return JsonResponse(
@@ -713,7 +822,8 @@ def predict_image(request):
                 'gate_model_used': gate_model_path if os.path.exists(gate_model_path) else None,
                 'model_loaded': True,
                 'image_size': original_size,
-                'processed_size': IMG_SIZE
+                'processed_size': processed_size,
+                'inference_mode': inference_mode
             }
         }
         

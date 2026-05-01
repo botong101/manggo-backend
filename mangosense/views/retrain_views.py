@@ -1,11 +1,12 @@
 import os
+import dataclasses
 import datetime
 from django.conf import settings
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
-from ..ML.retrain import start_retraining, get_status, get_dataset_preview
+from ..ML.retrain import start_retraining, get_status, get_dataset_preview, RetrainConfig
 from .ml_views import get_active_model_path
 
 MODELS_DIR = os.path.join(settings.BASE_DIR, 'models')
@@ -42,7 +43,18 @@ def trigger_retrain(request):
     output_filename = f'{model_type}-retrained-{timestamp}.keras'
     output_path     = os.path.join(MODELS_DIR, output_filename)
 
-    started = start_retraining(model_type, base_model_path, output_path)
+    config = RetrainConfig(
+        epochs=int(request.data.get('epochs', 10)),
+        learning_rate=float(request.data.get('learning_rate', 1e-4)),
+        batch_size=int(request.data.get('batch_size', 16)),
+        val_split=float(request.data.get('val_split', 0.2)),
+        unfreeze_top_n_layers=int(request.data.get('unfreeze_top_n_layers', 20)),
+        early_stopping_patience=int(request.data.get('early_stopping_patience', 3)),
+        lr_reduce_factor=float(request.data.get('lr_reduce_factor', 0.5)),
+        lr_reduce_patience=int(request.data.get('lr_reduce_patience', 2)),
+        min_images_per_class=int(request.data.get('min_images_per_class', 5)),
+    )
+    started = start_retraining(model_type, base_model_path, output_path, config)
     if not started:
         return JsonResponse(
             {'success': False, 'message': 'A retraining job is already running. Wait for it to finish.'},
@@ -56,6 +68,7 @@ def trigger_retrain(request):
             'model_type':      model_type,
             'base_model':      os.path.basename(base_model_path),
             'output_filename': output_filename,
+            'config': dataclasses.asdict(config),
         },
     })
 

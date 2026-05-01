@@ -881,8 +881,9 @@ def training_data_summary(request):
 
     breakdown = (
         MangoImage.objects
-        .filter(training_ready=True, selected_symptoms__isnull=False)
-        .exclude(selected_symptoms=[])
+        .filter(is_verified=True)
+        .exclude(disease_classification='')
+        .exclude(disease_classification__isnull=True)
         .values("disease_classification", "disease_type")
         .annotate(count=Count("id"))
         .order_by("disease_type", "disease_classification")

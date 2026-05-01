@@ -253,7 +253,7 @@ def _run_retraining(model_type: str, base_model_path: str, output_path: str):
             base.trainable = False
             inputs  = tf.keras.Input(shape=(224, 224, 3))
             x       = data_aug(inputs)
-            x       = tf.keras.layers.Rescaling(1.0 / 255)(x)
+            x       = tf.keras.layers.Rescaling(1 / 127.5, offset=-1)(x)
             x       = base(x, training=False)
             x       = tf.keras.layers.Dense(128, activation='relu')(x)
             x       = tf.keras.layers.Dropout(0.5)(x)

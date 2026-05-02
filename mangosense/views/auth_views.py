@@ -5,7 +5,6 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.shortcuts import render
 from rest_framework_simplejwt.tokens import RefreshToken
 from mangosense.models import UserProfile  # Import UserProfile model
 from .utils import validate_password_strength  # Import from utils to avoid duplication
@@ -28,11 +27,6 @@ def validate_address(address):
     if len(address) > 200:
         errors.append("Address cannot exceed 200 characters.")
     return errors
-
-# auth stuff
-def register_view(request):
-    if request.method == 'GET':
-        return render(request, 'mangosense/register.html')
 
 @csrf_exempt
 @require_http_methods(["POST"])

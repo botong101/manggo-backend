@@ -2,7 +2,6 @@ from rest_framework import status, generics, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.pagination import PageNumberPagination
 from django.http import JsonResponse, HttpResponse
 from django.db.models import Count, Q
 from django.utils import timezone
@@ -115,11 +114,6 @@ def get_top_predictions_for_image(image):
     ]
     
     return top_3_predictions
-
-#class StandardResultsSetPagination(PageNumberPagination):
- #   page_size = 20
-  #  page_size_query_param = 'page_size'
-   # max_page_size = 100
 
 # ================ STATS STUFF ================
 
@@ -512,12 +506,6 @@ def store_prediction_data(request, pk):
     """save prediction data from mobile app"""
     try:
         image = MangoImage.objects.get(pk=pk)
-        data = json.loads(request.body)
-        
-        # could store this in db later
-        # image.prediction_data = data
-        # image.save()
-        
         return JsonResponse({
             'success': True,
             'message': 'Prediction data stored successfully'
@@ -605,8 +593,6 @@ def user_detail(request, user_id):
             })
             
         elif request.method == 'PUT':
-            # update user stuff
-            import json
             try:
                 data = json.loads(request.body)
                 if 'is_active' in data:

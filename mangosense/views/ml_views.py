@@ -89,31 +89,34 @@ treatment_suggestions = {
 
 
 def get_treatment_for_disease(disease_name):
-   
     if not disease_name:
         return "No treatment information available - disease name is empty."
-    
-    # try exact match first
+
+    # 1. Query Disease table (any plant_part)
+    try:
+        from ..models import Disease as DiseaseModel
+        norm = disease_name.replace('_', ' ').replace('-', ' ').strip().lower()
+        for disease in DiseaseModel.objects.all():
+            if disease.name.replace('_', ' ').replace('-', ' ').strip().lower() == norm:
+                if disease.treatment:
+                    return disease.treatment
+                break  # found the record but it has no treatment yet — fall through
+    except Exception:
+        pass
+
+    # 2. Fallback to hardcoded dict
     treatment = treatment_suggestions.get(disease_name)
     if treatment:
         return treatment
-    
-    # try ignoring caps
     disease_lower = disease_name.lower()
     for key, value in treatment_suggestions.items():
         if key.lower() == disease_lower:
             return value
-    
-    # try matching with spaces instead of underscores
     disease_normalized = disease_name.replace('_', ' ').replace('-', ' ').strip()
     for key, value in treatment_suggestions.items():
-        key_normalized = key.replace('_', ' ').replace('-', ' ').strip()
-        if disease_normalized.lower() == key_normalized.lower():
+        if disease_normalized.lower() == key.replace('_', ' ').replace('-', ' ').strip().lower():
             return value
-    
-    # print what we got for debugging
-    available_keys = list(treatment_suggestions.keys())
-    
+
     return f"No treatment information available for '{disease_name}'. Please consult with an agricultural expert."
 
 # fallback filenames if DB has no config yet

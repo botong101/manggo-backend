@@ -320,6 +320,18 @@ class Disease(models.Model):
         ),
     )
 
+    description = models.TextField(
+        blank=True,
+        default='',
+        help_text="Brief description of the disease shown to users.",
+    )
+
+    treatment = models.TextField(
+        blank=True,
+        default='',
+        help_text="Treatment / management advice returned by the prediction API.",
+    )
+
     class Meta:
         unique_together = [('name', 'plant_part')]
         ordering = ['plant_part', 'name']

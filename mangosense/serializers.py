@@ -188,7 +188,7 @@ class SymptomAliasSerializer(serializers.ModelSerializer):
 class DiseaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Disease
-        fields = ['id', 'name', 'plant_part', 'is_in_classifier']
+        fields = ['id', 'name', 'plant_part', 'is_in_classifier', 'description', 'treatment']
         read_only_fields = ['id']
 
 

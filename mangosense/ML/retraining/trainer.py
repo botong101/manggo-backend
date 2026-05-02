@@ -182,6 +182,7 @@ def start_retraining(
     base_model_path: str,
     output_path: str,
     config: RetrainConfig | None = None,
+    model_kind: str = 'mobilenetv2',
 ) -> bool:
     """
     Kick off retraining in a background daemon thread.
@@ -195,6 +196,7 @@ def start_retraining(
         _status.update({
             'is_running':      True,
             'model_type':      model_type,
+            'model_kind':      model_kind,
             'phase':           'starting',
             'progress':        0,
             'message':         'Initialising retraining job…',

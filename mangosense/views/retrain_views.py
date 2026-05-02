@@ -7,6 +7,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
 from ..ML.retrain import start_retraining, get_status, get_dataset_preview, RetrainConfig
+from ..ML.symptom_extraction import get_extraction_status, start_extraction, check_symptoms_ready
 from .ml_views import get_active_model_path
 
 MODELS_DIR = os.path.join(settings.BASE_DIR, 'models')
@@ -24,9 +25,15 @@ def trigger_retrain(request):
     Returns 409 if a job is already running.
     """
     model_type = request.data.get('model_type', 'leaf')
+    model_kind = request.data.get('model_kind', 'mobilenetv2')
     if model_type not in ('leaf', 'fruit'):
         return JsonResponse(
             {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+    if model_kind not in ('mobilenetv2', 'hybrid_cnn'):
+        return JsonResponse(
+            {'success': False, 'message': "model_kind must be 'mobilenetv2' or 'hybrid_cnn'"},
             status=400,
         )
 
@@ -54,7 +61,7 @@ def trigger_retrain(request):
         lr_reduce_patience=int(request.data.get('lr_reduce_patience', 2)),
         min_images_per_class=int(request.data.get('min_images_per_class', 5)),
     )
-    started = start_retraining(model_type, base_model_path, output_path, config)
+    started = start_retraining(model_type, base_model_path, output_path, config, model_kind=model_kind)
     if not started:
         return JsonResponse(
             {'success': False, 'message': 'A retraining job is already running. Wait for it to finish.'},
@@ -63,9 +70,10 @@ def trigger_retrain(request):
 
     return JsonResponse({
         'success': True,
-        'message': f'Retraining started for the {model_type} model.',
+        'message': f'Retraining started for the {model_type} model ({model_kind}).',
         'data': {
             'model_type':      model_type,
+            'model_kind':      model_kind,
             'base_model':      os.path.basename(base_model_path),
             'output_filename': output_filename,
             'config': dataclasses.asdict(config),
@@ -106,3 +114,73 @@ def retrain_dataset_info(request):
 
     preview = get_dataset_preview(model_type)
     return JsonResponse({'success': True, 'data': preview})
+
+
+# ── Symptom feature extraction (Hybrid CNN prerequisite) ──────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def trigger_symptom_extraction(request):
+    """
+    Start symptom feature extraction in the background.
+
+    Scans verified+training_ready images, extracts color/texture/lesion
+    features, and saves them to a CSV that the Hybrid CNN training job reads.
+
+    Request body:
+        { "model_type": "leaf" | "fruit" }
+
+    Returns 409 if extraction is already running.
+    """
+    model_type = request.data.get('model_type', 'leaf')
+    if model_type not in ('leaf', 'fruit'):
+        return JsonResponse(
+            {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+
+    started = start_extraction(model_type)
+    if not started:
+        return JsonResponse(
+            {'success': False, 'message': 'A symptom extraction job is already running.'},
+            status=409,
+        )
+
+    return JsonResponse({
+        'success': True,
+        'message': f'Symptom feature extraction started for the {model_type} dataset.',
+        'data': {'model_type': model_type},
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def symptom_extraction_status(request):
+    """
+    Poll the current symptom extraction job status.
+
+    Returns: is_running, phase, progress, message, output_csv, rows_extracted, error
+    """
+    status = get_extraction_status()
+    return JsonResponse({'success': True, 'data': status})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def symptoms_ready(request):
+    """
+    Check whether the symptom CSV for a given model_type already exists.
+
+    Query param: ?model_type=leaf  (default: leaf)
+
+    Returns: { ready: bool, csv_path: str|null, rows: int|null }
+    """
+    model_type = request.query_params.get('model_type', 'leaf')
+    if model_type not in ('leaf', 'fruit'):
+        return JsonResponse(
+            {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+
+    result = check_symptoms_ready(model_type)
+    return JsonResponse({'success': True, 'data': result})

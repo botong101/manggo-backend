@@ -26,6 +26,7 @@ opt_einsum==3.4.0
 optree==0.16.0
 packaging==25.0
 pillow==11.3.0
+opencv-python==4.10.0.84
 protobuf==5.29.5
 Pygments==2.19.2
 PyJWT==2.9.0

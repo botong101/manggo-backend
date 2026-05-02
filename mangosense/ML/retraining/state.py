@@ -5,6 +5,7 @@ _lock = threading.Lock()
 _status: dict = {
     'is_running':      False,
     'model_type':      None,
+    'model_kind':      None,  # mobilenetv2 | hybrid_cnn
     'phase':           None,  # starting | downloading | preparing | training | evaluating | saving | done | error
     'progress':        0,
     'message':         '',

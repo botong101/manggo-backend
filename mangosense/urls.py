@@ -67,6 +67,9 @@ from .views.retrain_views import (
     trigger_retrain,
     retrain_status,
     retrain_dataset_info,
+    trigger_symptom_extraction,
+    symptom_extraction_status,
+    symptoms_ready,
 )
 from .views.symptom_admin_views import (
     symptom_list, symptom_detail,
@@ -149,6 +152,9 @@ urlpatterns = [
     path('retrain/', trigger_retrain, name='trigger_retrain'),
     path('retrain/status/', retrain_status, name='retrain_status'),
     path('retrain/dataset-info/', retrain_dataset_info, name='retrain_dataset_info'),
+    path('retrain/extract-symptoms/', trigger_symptom_extraction, name='trigger_symptom_extraction'),
+    path('retrain/extract-symptoms/status/', symptom_extraction_status, name='symptom_extraction_status'),
+    path('retrain/symptoms-ready/', symptoms_ready, name='symptoms_ready'),
 
     # disease symptoms vocabulary
     path('symptoms/', get_disease_symptoms, name='get_disease_symptoms'),

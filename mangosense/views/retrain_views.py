@@ -18,14 +18,25 @@ def trigger_retrain(request):
     Start a retraining job in the background.
 
     Request body:
-        { "model_type": "leaf" | "fruit" }
+        { 
+            "model_type": "leaf" | "fruit",
+            "model_variant": "standard" | "hybrid"  (optional, defaults to 'standard')
+        }
 
     Returns 409 if a job is already running.
     """
     model_type = request.data.get('model_type', 'leaf')
+    model_variant = request.data.get('model_variant', 'standard')
+    
     if model_type not in ('leaf', 'fruit'):
         return JsonResponse(
             {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+    
+    if model_variant not in ('standard', 'hybrid'):
+        return JsonResponse(
+            {'success': False, 'message': "model_variant must be 'standard' or 'hybrid'"},
             status=400,
         )
 
@@ -39,10 +50,10 @@ def trigger_retrain(request):
 
     base_model_path = get_active_model_path(model_type)
     timestamp       = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_filename = f'{model_type}-retrained-{timestamp}.keras'
+    output_filename = f'{model_type}-{model_variant}-retrained-{timestamp}.keras'
     output_path     = os.path.join(MODELS_DIR, output_filename)
 
-    started = start_retraining(model_type, base_model_path, output_path)
+    started = start_retraining(model_type, base_model_path, output_path, model_variant)
     if not started:
         return JsonResponse(
             {'success': False, 'message': 'A retraining job is already running. Wait for it to finish.'},
@@ -51,9 +62,10 @@ def trigger_retrain(request):
 
     return JsonResponse({
         'success': True,
-        'message': f'Retraining started for the {model_type} model.',
+        'message': f'Retraining started for the {model_type} model ({model_variant} variant).',
         'data': {
             'model_type':      model_type,
+            'model_variant':   model_variant,
             'base_model':      os.path.basename(base_model_path),
             'output_filename': output_filename,
         },

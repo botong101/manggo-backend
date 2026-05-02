@@ -865,9 +865,6 @@ def predict_image(request):
         )
 
 
-
-
-
 @api_view(['GET'])
 def test_model_status(request):
     

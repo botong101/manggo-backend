@@ -9,6 +9,39 @@ from .dataset import build_temp_dataset, collect_verified_images
 from .state import _lock, _set, _status
 
 
+def _load_model_compat(path: str):
+    """
+    Load a Keras .keras model with cross-version compatibility.
+
+    Keras 3.x added `quantization_config` to Dense's serialised config.
+    The deserialiser resolves built-in classes by module path, so
+    custom_objects won't intercept them. Instead we temporarily monkey-patch
+    Dense.from_config to strip unknown kwargs, then restore it.
+    """
+    import tensorflow as tf
+
+    # First attempt: normal load
+    try:
+        return tf.keras.models.load_model(path)
+    except (TypeError, ValueError):
+        pass  # fall through to compat load
+
+    # Second attempt: patch Dense.from_config so unknown kwargs are dropped
+    Dense     = tf.keras.layers.Dense
+    _orig_fn  = Dense.from_config.__func__
+
+    @classmethod
+    def _compat_from_config(cls, config):
+        config.pop('quantization_config', None)
+        return _orig_fn(cls, config)
+
+    Dense.from_config = _compat_from_config
+    try:
+        return tf.keras.models.load_model(path)
+    finally:
+        Dense.from_config = classmethod(_orig_fn)
+
+
 def _run_retraining(model_type: str, base_model_path: str, output_path: str, config: RetrainConfig) -> None:
     tmp_dir = None
     try:
@@ -67,7 +100,7 @@ def _run_retraining(model_type: str, base_model_path: str, output_path: str, con
         _set(progress=35, message='Loading base model…')
 
         if os.path.exists(base_model_path):
-            model = tf.keras.models.load_model(base_model_path)
+            model = _load_model_compat(base_model_path)
             if model.output_shape[-1] != num_classes:
                 _set(message=(
                     f'Output class count changed ({model.output_shape[-1]} → {num_classes}). '

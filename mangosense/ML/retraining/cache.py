@@ -27,7 +27,7 @@ def _cache_path_for(model_type: str, label: str, img_id: int, image_name: str) -
 
 def download_image_to_cache(img, model_type: str) -> str | None:
     """
-    Stream img from its storage backend (S3 or local) into the persistent cache.
+    Stream img from its storage backend into the persistent cache.
     Skips download when a cached file with matching byte size already exists.
     Returns absolute local path, or None on failure.
     """

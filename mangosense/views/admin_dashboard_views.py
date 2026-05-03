@@ -123,44 +123,50 @@ def get_top_predictions_for_image(image):
 def disease_statistics(request):
     """stats for dashboard"""
     try:
-        #how many images total
-        total_images = MangoImage.objects.count()
-        
+        # Base queryset: only images that went through ML classification.
+        # Bulk-imported training images have no predicted_class and must be
+        # excluded so they don't pollute disease statistics.
+        classified_qs = MangoImage.objects.exclude(
+            Q(predicted_class='') | Q(predicted_class__isnull=True)
+        )
+
+        #how many images total (classified only)
+        total_images = classified_qs.count()
+
         #how many healthy
-        healthy_images = MangoImage.objects.filter(
-            Q(predicted_class__icontains='healthy') | 
-            Q(predicted_class__icontains='Healthy')
+        healthy_images = classified_qs.filter(
+            predicted_class__icontains='healthy'
         ).count()
-        
+
         diseased_images = total_images - healthy_images
-        
+
         #leaf vs fruit count
-        leaf_images = MangoImage.objects.filter(
+        leaf_images = classified_qs.filter(
             predicted_class__icontains='Leaf'
         ).count()
-        
-        fruit_images = MangoImage.objects.filter(
+
+        fruit_images = classified_qs.filter(
             predicted_class__icontains='Fruit'
         ).count()
-        
+
         #group by disease
         diseases_breakdown = {}
-        disease_counts = MangoImage.objects.values('predicted_class').annotate(
+        disease_counts = classified_qs.values('predicted_class').annotate(
             count=Count('id')
         ).order_by('-count')
-        
+
         for disease in disease_counts:
             diseases_breakdown[disease['predicted_class']] = disease['count']
-        
-        #last 7 days
+
+        #last 7 days (classified only)
         week_ago = timezone.now() - timedelta(days=7)
-        recent_uploads = MangoImage.objects.filter(
+        recent_uploads = classified_qs.filter(
             uploaded_at__gte=week_ago
         ).count()
-        
-        #last 30 days
+
+        #last 30 days (classified only)
         month_ago = timezone.now() - timedelta(days=30)
-        monthly_uploads = MangoImage.objects.filter(
+        monthly_uploads = classified_qs.filter(
             uploaded_at__gte=month_ago
         ).count()
         
@@ -711,6 +717,7 @@ def disease_trends(request):
 
         daily_qs = (
             MangoImage.objects
+            .exclude(Q(predicted_class='') | Q(predicted_class__isnull=True))
             .filter(uploaded_at__gte=start_date)
             .annotate(date=TruncDate('uploaded_at'))
             .values('date')

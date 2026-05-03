@@ -923,3 +923,65 @@ def training_data_bulk_approve(request):
         "updated_count": updated,
         "training_ready": training_ready,
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def training_data_bulk_import(request):
+    """
+    Bulk-import images directly as verified + training-ready records.
+    Intended for admin testing — bypasses the normal upload → verify → approve flow.
+
+    Multipart body:
+        images               — one or more image files
+        disease_type         — 'leaf' | 'fruit'
+        disease_classification — class label string
+        training_ready       — 'true' | 'false'  (default: 'true')
+    """
+    if not request.user.is_staff and not request.user.is_superuser:
+        return JsonResponse({'success': False, 'message': 'Admin access required.'}, status=403)
+
+    images = request.FILES.getlist('images')
+    if not images:
+        return JsonResponse({'success': False, 'message': 'No images provided.'}, status=400)
+
+    disease_type = request.data.get('disease_type', '').strip()
+    disease_classification = request.data.get('disease_classification', '').strip()
+    mark_training_ready = str(request.data.get('training_ready', 'true')).lower() == 'true'
+
+    if disease_type not in ('leaf', 'fruit'):
+        return JsonResponse(
+            {'success': False, 'message': "disease_type must be 'leaf' or 'fruit'."}, status=400
+        )
+    if not disease_classification:
+        return JsonResponse(
+            {'success': False, 'message': 'disease_classification is required.'}, status=400
+        )
+
+    now = timezone.now()
+    created = []
+    errors  = []
+
+    for img_file in images:
+        try:
+            record = MangoImage.objects.create(
+                image=img_file,
+                original_filename=img_file.name,
+                disease_type=disease_type,
+                disease_classification=disease_classification,
+                is_verified=True,
+                verified_by=request.user,
+                verified_date=now,
+                training_ready=mark_training_ready,
+                user=request.user,
+            )
+            created.append({'id': record.id, 'filename': img_file.name})
+        except Exception as exc:
+            errors.append({'filename': img_file.name, 'error': str(exc)})
+
+    return JsonResponse({
+        'success': True,
+        'message': f'Imported {len(created)} image(s).' + (f' {len(errors)} failed.' if errors else ''),
+        'created': len(created),
+        'errors': errors,
+    })

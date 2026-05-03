@@ -2,9 +2,20 @@ import os
 import random
 import shutil
 
-from .cache import download_image_to_cache
+from django.conf import settings
+
+from .cache import download_image_to_cache, RETRAIN_CACHE_DIR
 from .config import MIN_IMAGES_PER_CLASS
 from .state import _set
+
+_PREPROC_DIR = os.path.join(settings.MEDIA_ROOT, 'retrain_preprocessed')
+
+
+def _preprocessed_path(raw_cache_path: str) -> str:
+    """Return the preprocessed counterpart for a raw cache file."""
+    rel  = os.path.relpath(raw_cache_path, RETRAIN_CACHE_DIR)
+    base = os.path.splitext(rel)[0]
+    return os.path.join(_PREPROC_DIR, base + '.png')
 
 
 def collect_verified_images(model_type: str, min_images_per_class: int = MIN_IMAGES_PER_CLASS) -> dict:
@@ -39,7 +50,9 @@ def collect_verified_images(model_type: str, min_images_per_class: int = MIN_IMA
 
         local_path = download_image_to_cache(img, model_type)
         if local_path and os.path.isfile(local_path):
-            class_map.setdefault(label, []).append(local_path)
+            preproc = _preprocessed_path(local_path)
+            final   = preproc if os.path.isfile(preproc) else local_path
+            class_map.setdefault(label, []).append(final)
             downloaded += 1
         else:
             failed += 1
@@ -57,7 +70,7 @@ def collect_verified_images(model_type: str, min_images_per_class: int = MIN_IMA
     return {k: v for k, v in class_map.items() if len(v) >= min_images_per_class}
 
 
-def get_dataset_preview(model_type: str) -> dict:
+def get_dataset_preview(model_type: str, min_images_per_class: int = MIN_IMAGES_PER_CLASS) -> dict:
     """
     Return per-class image counts for the dataset-info endpoint.
     Does NOT download files — uses storage.exists() only.
@@ -82,7 +95,7 @@ def get_dataset_preview(model_type: str) -> dict:
         except Exception:
             continue
 
-    eligible = {k: v for k, v in all_counts.items() if v >= MIN_IMAGES_PER_CLASS}
+    eligible = {k: v for k, v in all_counts.items() if v >= min_images_per_class}
     can_retrain = len(eligible) >= 2
 
     return {
@@ -90,12 +103,12 @@ def get_dataset_preview(model_type: str) -> dict:
         'all_classes':            all_counts,
         'eligible_classes':       eligible,
         'total_eligible_images':  sum(eligible.values()),
-        'min_images_per_class':   MIN_IMAGES_PER_CLASS,
+        'min_images_per_class':   min_images_per_class,
         'can_retrain':            can_retrain,
         'reason': (
             None if can_retrain
             else (
-                f'Need at least 2 classes with {MIN_IMAGES_PER_CLASS}+ images that are '
+                f'Need at least 2 classes with {min_images_per_class}+ images that are '
                 f'both is_verified=True and training_ready=True.'
             )
         ),
@@ -119,7 +132,8 @@ def build_temp_dataset(class_map: dict, tmp_dir: str, val_split: float):
         shuffled = paths[:]
         random.shuffle(shuffled)
 
-        n_val   = max(1, int(len(shuffled) * val_split))
+        # Clamp so train always gets at least 1 image (handles tiny test datasets)
+        n_val   = min(max(1, int(len(shuffled) * val_split)), len(shuffled) - 1)
         n_train = len(shuffled) - n_val
 
         for split_name, split_paths in [('train', shuffled[:n_train]), ('val', shuffled[n_train:])]:

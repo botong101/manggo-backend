@@ -4,9 +4,9 @@ from .state import get_status
 from .trainer import start_retraining
 
 __all__ = [
-    'RetrainConfig',
     'MIN_IMAGES_PER_CLASS',
-    'get_status',
+    'RetrainConfig',
     'get_dataset_preview',
+    'get_status',
     'start_retraining',
 ]

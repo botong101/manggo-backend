@@ -6,7 +6,7 @@ from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
-from ..ML.retrain import start_retraining, get_status, get_dataset_preview, RetrainConfig
+from ..ML.retrain import start_retraining, get_status, get_dataset_preview, RetrainConfig, MIN_IMAGES_PER_CLASS
 from ..ML.symptom_extraction import get_extraction_status, start_extraction, check_symptoms_ready
 from .ml_views import get_active_model_path
 
@@ -37,8 +37,9 @@ def trigger_retrain(request):
             status=400,
         )
 
-    # Quick dataset check before starting
-    preview = get_dataset_preview(model_type)
+    # Quick dataset check before starting (use the configured min_images_per_class)
+    min_imgs = int(request.data.get('min_images_per_class', 5))
+    preview  = get_dataset_preview(model_type, min_images_per_class=min_imgs)
     if not preview['can_retrain']:
         return JsonResponse(
             {'success': False, 'message': preview['reason'], 'data': preview},
@@ -60,6 +61,7 @@ def trigger_retrain(request):
         lr_reduce_factor=float(request.data.get('lr_reduce_factor', 0.5)),
         lr_reduce_patience=int(request.data.get('lr_reduce_patience', 2)),
         min_images_per_class=int(request.data.get('min_images_per_class', 5)),
+        modality_dropout=float(request.data.get('modality_dropout', 0.5)),
     )
     started = start_retraining(model_type, base_model_path, output_path, config, model_kind=model_kind)
     if not started:
@@ -112,7 +114,12 @@ def retrain_dataset_info(request):
             status=400,
         )
 
-    preview = get_dataset_preview(model_type)
+    try:
+        min_imgs = int(request.query_params.get('min_images_per_class', MIN_IMAGES_PER_CLASS))
+    except (ValueError, TypeError):
+        min_imgs = MIN_IMAGES_PER_CLASS
+
+    preview = get_dataset_preview(model_type, min_images_per_class=min_imgs)
     return JsonResponse({'success': True, 'data': preview})
 
 
@@ -163,6 +170,78 @@ def symptom_extraction_status(request):
     """
     status = get_extraction_status()
     return JsonResponse({'success': True, 'data': status})
+
+
+# ── Image preprocessing ───────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def trigger_preprocessing(request):
+    """
+    Start image preprocessing in the background.
+
+    Downloads all verified+training_ready images for the given model_type,
+    applies resize (INTER_AREA) + Gaussian denoise, and saves the results
+    to retrain_preprocessed/. The retraining job automatically picks up
+    preprocessed images when they exist.
+
+    Request body:
+        { "model_type": "leaf" | "fruit" }
+
+    Returns 409 if preprocessing is already running.
+    """
+    from ..ML.preprocessing import start_preprocessing
+
+    model_type = request.data.get('model_type', 'leaf')
+    if model_type not in ('leaf', 'fruit'):
+        return JsonResponse(
+            {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+
+    started = start_preprocessing(model_type)
+    if not started:
+        return JsonResponse(
+            {'success': False, 'message': 'A preprocessing job is already running.'},
+            status=409,
+        )
+
+    return JsonResponse({
+        'success': True,
+        'message': f'Preprocessing started for the {model_type} dataset.',
+        'data': {'model_type': model_type},
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def preprocessing_status(request):
+    """Poll current preprocessing job status."""
+    from ..ML.preprocessing import get_status
+    return JsonResponse({'success': True, 'data': get_status()})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def preprocessing_ready(request):
+    """
+    Check whether preprocessed images exist for model_type.
+
+    Query param: ?model_type=leaf  (default: leaf)
+
+    Returns: { ready: bool, processed: int, classes: int }
+    """
+    from ..ML.preprocessing import check_preprocessing_ready
+
+    model_type = request.query_params.get('model_type', 'leaf')
+    if model_type not in ('leaf', 'fruit'):
+        return JsonResponse(
+            {'success': False, 'message': "model_type must be 'leaf' or 'fruit'"},
+            status=400,
+        )
+
+    result = check_preprocessing_ready(model_type)
+    return JsonResponse({'success': True, 'data': result})
 
 
 @api_view(['GET'])

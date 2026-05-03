@@ -32,7 +32,8 @@ from .views.admin_dashboard_views import (
     #training data editor
     training_data_detail,
     training_data_summary,
-    training_data_bulk_approve
+    training_data_bulk_approve,
+    training_data_bulk_import,
 )
 from .views.media_views import (
     #serving images
@@ -70,6 +71,9 @@ from .views.retrain_views import (
     trigger_symptom_extraction,
     symptom_extraction_status,
     symptoms_ready,
+    trigger_preprocessing,
+    preprocessing_status,
+    preprocessing_ready,
 )
 from .views.symptom_admin_views import (
     symptom_list, symptom_detail,
@@ -143,6 +147,7 @@ urlpatterns = [
     path('training-data/<int:pk>/', training_data_detail, name='training_data_detail'),
     path('training-data/summary/', training_data_summary, name='training_data_summary'),
     path('training-data/bulk-approve/', training_data_bulk_approve, name='training_data_bulk_approve'),
+    path('training-data/bulk-import/', training_data_bulk_import, name='training_data_bulk_import'),
 
     # disease locations for map
     path('disease-locations/similar/', disease_locations_similar, name='disease_locations_similar'),
@@ -155,6 +160,9 @@ urlpatterns = [
     path('retrain/extract-symptoms/', trigger_symptom_extraction, name='trigger_symptom_extraction'),
     path('retrain/extract-symptoms/status/', symptom_extraction_status, name='symptom_extraction_status'),
     path('retrain/symptoms-ready/', symptoms_ready, name='symptoms_ready'),
+    path('retrain/preprocess/', trigger_preprocessing, name='trigger_preprocessing'),
+    path('retrain/preprocess/status/', preprocessing_status, name='preprocessing_status'),
+    path('retrain/preprocess/ready/', preprocessing_ready, name='preprocessing_ready'),
 
     # disease symptoms vocabulary
     path('symptoms/', get_disease_symptoms, name='get_disease_symptoms'),

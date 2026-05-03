@@ -13,22 +13,34 @@ def _load_model_compat(path: str):
     """
     Load a Keras .keras model with cross-version compatibility.
 
-    Keras 3.x added `quantization_config` to Dense's serialised config.
-    The deserialiser resolves built-in classes by module path, so
-    custom_objects won't intercept them. Instead we temporarily monkey-patch
-    Dense.from_config to strip unknown kwargs, then restore it.
+    Handles two known serialisation mismatches:
+
+    1. Lambda(preprocess_input) layer — older training scripts wrapped
+       tf.keras.applications.mobilenet_v2.preprocess_input in a Lambda layer
+       named 'mobilenetv2_preprocess'. Keras 3.x stores the function by name
+       only and can't locate it on reload. Supplying custom_objects fixes it.
+
+    2. quantization_config kwarg in Dense.from_config — Keras 3.x added this
+       field to Dense's serialised config; older Keras drops it with a
+       TypeError. We monkey-patch Dense.from_config to strip the unknown kwarg.
+
+    Both patches are applied together on the second attempt so a single load
+    call handles models that have either or both issues.
     """
     import tensorflow as tf
+    from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as _mobilenet_preprocess
 
-    # First attempt: normal load
+    _custom_objects = {'preprocess_input': _mobilenet_preprocess}
+
+    # Attempt 1: supply custom_objects (resolves Lambda(preprocess_input))
     try:
-        return tf.keras.models.load_model(path)
+        return tf.keras.models.load_model(path, custom_objects=_custom_objects)
     except (TypeError, ValueError):
-        pass  # fall through to compat load
+        pass
 
-    # Second attempt: patch Dense.from_config so unknown kwargs are dropped
-    Dense     = tf.keras.layers.Dense
-    _orig_fn  = Dense.from_config.__func__
+    # Attempt 2: also patch Dense.from_config to drop quantization_config
+    Dense    = tf.keras.layers.Dense
+    _orig_fn = Dense.from_config.__func__
 
     @classmethod
     def _compat_from_config(cls, config):
@@ -37,7 +49,7 @@ def _load_model_compat(path: str):
 
     Dense.from_config = _compat_from_config
     try:
-        return tf.keras.models.load_model(path)
+        return tf.keras.models.load_model(path, custom_objects=_custom_objects)
     finally:
         Dense.from_config = classmethod(_orig_fn)
 
@@ -241,9 +253,17 @@ def start_retraining(
             'dataset_info':    None,
         })
 
+    if model_kind == 'hybrid_cnn':
+        from .hybrid_trainer import run_hybrid_retraining
+        target = run_hybrid_retraining
+        args   = (model_type, output_path, cfg)
+    else:
+        target = _run_retraining
+        args   = (model_type, base_model_path, output_path, cfg)
+
     threading.Thread(
-        target=_run_retraining,
-        args=(model_type, base_model_path, output_path, cfg),
+        target=target,
+        args=args,
         daemon=True,
         name=f'mangosense-retrain-{model_type}',
     ).start()

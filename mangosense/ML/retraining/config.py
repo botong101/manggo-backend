@@ -14,3 +14,4 @@ class RetrainConfig:
     lr_reduce_factor:        float = 0.5
     lr_reduce_patience:      int   = 2
     min_images_per_class:    int   = MIN_IMAGES_PER_CLASS
+    modality_dropout:        float = 0.5   # Hybrid CNN only: fraction of symptom vectors zeroed per training step

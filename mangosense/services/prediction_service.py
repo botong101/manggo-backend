@@ -81,28 +81,8 @@ def run_prediction_pipeline(
             model_class_names = list(prototypes.keys())
 
         image_file.seek(0)
-        prediction_p1, processed_size = run_hybrid_model(model, image_file, img_size, num_features)
-
+        prediction, processed_size = run_hybrid_model(model, image_file, img_size, num_features)
         inference_mode = "zero_symptoms"
-        symptom_vector = None
-        if prototypes:
-            if detected_disease and detected_disease in prototypes:
-                target_class = detected_disease
-                inference_mode = "user_confirmed_prototype"
-            else:
-                target_class = model_class_names[int(np.argmax(prediction_p1))]
-                inference_mode = "self_confirmed_prototype"
-            proto_values = prototypes.get(target_class)
-            if proto_values is not None:
-                symptom_vector = np.array([proto_values], dtype=np.float32)
-
-        if symptom_vector is not None:
-            image_file.seek(0)
-            prediction, processed_size = run_hybrid_model(
-                model, image_file, img_size, num_features, symptom_vector
-            )
-        else:
-            prediction = prediction_p1
     else:
         prediction = model.predict(img_array)
         prediction = np.array(prediction).flatten()
